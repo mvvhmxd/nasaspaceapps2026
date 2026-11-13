@@ -1,0 +1,35 @@
+ASCII	every figure, the HUD, map, sky and title are characters on a 142x45 canvas grid	evidence/play.png
+2D top-down ASCII map	map box: top-down character map of the site	evidence/play.png
+360° skyline strip	SKY box across the top, 0-360° azimuth, ray-marched horizon	evidence/play.png
+real south pole	hand-shaped Shackleton rim, Connecting Ridge and a shadowed terrace (illustrative)	evidence/play.png
+title logo	hand-made block-letter CRATER EXPECTATIONS built from characters	evidence/title.png
+HUD	instrument bar, status, Earth and radio panels in box-drawing borders	evidence/play.png
+menus	title, pause, results and failure screens are boxed text	evidence/play.png
+gauges	battery [█████░░░] gauge	evidence/play.png
+dialogs	typewriter mission briefings in a box	evidence/play.png
+radio messages	RADIO panel, typed in	evidence/play.png
+transitions	typewriter reveal of logo and dialogs, landing dust, transmit pulse	evidence/play.png
+end screens	MISSION COMPLETE / CAMPAIGN COMPLETE / BATTERY DEPLETED boxes	index.html (scenes.results, scenes.over)
+box-drawing borders	┌─┐│└┘ on every panel	evidence/play.png
+no images or icons	no image files or icons; all text	index.html
+high-detail ASCII on a canvas grid	long character ramp per cell, oversampled offscreen canvas	evidence/play.png
+character-density ramp	RAMP of 67 characters by lit intensity	index.html (RAMP)
+hillshaded by the real sun direction	per-cell normal dotted with the Sun vector	index.html (relight)
+long real cast shadows at low sun	shadow ray-march toward the Sun with lunar curvature	index.html (relight)
+pitch-black shadowed crater with faint blue frost	PSR cells black with blue · frost	evidence/play.png
+grey regolith	grey ramp colours	evidence/play.png
+amber sun	amber Sun, lit faces and glare	evidence/play.png
+blue/white Earth	blue ocean, white cloud Earth	evidence/play.png
+phosphor-green UI	green borders and text	evidence/play.png
+subtle CRT glow	blurred additive glow pass, scanlines and vignette	evidence/play.png
+detailed ASCII Earth disc showing its phase	EARTH panel, lit by Sun direction, rotating continents	evidence/play.png
+sun glare when clipping a ridge	amber ridge glow and glare streak when Sun within 0.7° of skyline	index.html (composeSky, present)
+animated dish and panels	dish and panel characters turn toward Earth and Sun	index.html (composeLander)
+footprints	∙ left on visited cells	evidence/play.png
+landing dust	particle burst on touchdown	index.html (land)
+transmit pulse	arc of ) and · rippling toward Earth	index.html (composePlay)
+raymarched ASCII first-person look mode	miss: optional and later, out of scope for this build	-
+2D	2D top-down character map	evidence/surface.png
+top-down	map seen from straight above	evidence/surface.png
+first-person	miss: the raymarched first-person look mode is optional and later (Out of scope)	-
+yours	miss: not a look word (from the Question line)	-

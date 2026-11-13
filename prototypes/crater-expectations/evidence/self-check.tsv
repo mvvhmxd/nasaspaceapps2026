@@ -1,0 +1,46 @@
+time	2026-11-14 00:09:52
+keep	lines	0	pinned	0
+briefword	2D	unlisted
+briefword	top-down	unlisted
+briefword	first-person	unlisted
+briefword	yours	unlisted
+checklist	L1	unlisted	-	Look: everything ASCII on a canvas character grid in one crisp monospace font. Terrain shaded with a long character-density ramp, hillshaded by the current sun azimuth/elevation, with long real cast shadows at low sun; pitch-black shadowed crater with faint blue `·` frost. Limited palette: 5–6 greys for regolith, amber/white for the Sun and lit faces, blue/white Earth, phosphor-green UI, black star field, subtle CRT glow and scanlines. Box-drawing borders, gauges as `[████░░]`, hand-made ASCII title logo. Signature detail: a detailed ASCII Earth disc showing its phase hanging over the skyline strip, and sun glare streaks when the Sun clips a ridge. Animated dish and panels tracking Earth and Sun, footprints, landing dust, transmit pulse. Every figure drawn in characters: no images, no emoji, no plain circles.	
+checklist	L2	unlisted	-	References: the real lunar south pole (Shackleton rim, Connecting Ridge, the low sun) *(guessed)*; classic roguelike ASCII readability *(guessed)*.	
+checklist	L3	unlisted	-	View: 2D · Camera: top-down map, with a 360° skyline panorama strip above it.	
+checklist	F1	unlisted	-	Orbit scout: ASCII map of the site, a live 360° skyline from the scout's position, up to 3 flags with each site's sunlit % and Earth visibility, time scrub to preview the sky, then land.	
+checklist	F2	unlisted	-	Horizon sky model: placeholder Sun and Earth tracks (low Sun circling, Earth wobbling) occluded by the heightmap horizon; instrument bar with sun elevation, time to sunset/Earthset, Earth visibility.	
+checklist	F3	unlisted	-	Turn-based surface: steps and work cost mission time; five stations: hab, solar array (low-power wait), survey (needs Sun), drill (needs battery reserve, pays more in the shadowed crater), dish (needs Earth); battery drains in the dark and cold.	
+checklist	F4	unlisted	-	Three short missions: learn the horizon, get science home, the trade-off; Mission 3's 12-hour launch slip sends you back to orbit to re-pick or hold; radio messages from mission control.	
+checklist	F5	unlisted	-	ASCII art pass: hillshade, cast shadows, crater frost, phased Earth disc, sun glare, animated dish and panels, footprints, landing dust, transmit pulse, CRT glow, ASCII title, HUD and end screens.	
+checklist	F6	unlisted	-	Synthesized sound and generative music that follow the sky (warm in Sun, cold in shadow, home layer while Earth is visible, tension near set); mute toggle.	
+checklist	S1	unlisted	-	scouting from orbit with flags and time-warp · in the slice	
+checklist	S2	unlisted	-	360° skyline and horizon occlusion of the Sun and Earth · in the slice	
+checklist	S3	unlisted	-	power and battery · in the slice	
+checklist	S4	unlisted	-	science: survey, drill, transmit · in the slice	
+checklist	S5	unlisted	-	three missions and the 12-hour launch slip · in the slice	
+checklist	S6	unlisted	-	generative music and synthesized sound · in the slice	
+checklist	M1	unlisted	-	The title logo types itself in with typewriter clicks and radio static.	
+checklist	M2	unlisted	-	Mission 1 opens in orbit over the site: the skyline strip shows the Sun sitting just above a ridge, and the hint reads "Move the scout.	
+checklist	M3	unlisted	-	Watch the sky."	
+checklist	M4	unlisted	-	Moving one way, the Sun sinks behind a ridge and the map's shadows swing; the other way, it clears.	
+checklist	M5	unlisted	-	The player plants a flag where the Sun is clear and presses Enter.	
+checklist	M6	unlisted	-	Landing dust, a thump, the hab appears.	
+checklist	M7	unlisted	-	They step to the survey station and press E: science ticks up while the instrument bar shows SUN VISIBLE.	
+checklist	M8	unlisted	-	A few turns later the Sun's track nears a ridge shoulder, the bar turns amber, "SUNSET 6h", and the music thins and turns cold.	
+checklist	M9	unlisted	-	The ridge, not the clock, is what ends the day.	
+checklist	C1	unlisted	-	Mission 1 is gentle: one sunset around minute 3, and enough battery to wait it out at the array.	
+checklist	C2	unlisted	-	Mission 2 adds Earthset: science you collected but have not transmitted is worth nothing until you send it before Earth slips behind the ridge.	
+checklist	C3	unlisted	-	Mission 3 is the full trade-off: the shadowed terrace pays most but drains the battery in the cold, and a 12-hour launch slip moves the whole sky.	
+checklist	C4	unlisted	-	If the battery hits zero, the mission ends early and you keep only what was transmitted.	
+checklist	C5	unlisted	-	Each mission ends at its departure time.	
+checklist	C6	unlisted	-	*(provisional, from "in between")*	
+browser	HeadlessChrome/157.0.0.0
+scene	play	0	title
+scene	play	1	play
+digits	log	15px "DejaVu Sans Mono", Consolas, "Courier New", monospace	tabular	0
+measure	step-time	play	1.260	123.300	206
+lane	play	stop	3.4	880
+uncaught	play	0
+screen	play	drawn
+shot	play	prototypes/crater-expectations/evidence/play.png
+responds	changed	4

@@ -1,0 +1,167 @@
+# The one-shot's small check (check-run/1).
+# Written by one-shot-check.sh --record: the results are /prototype's reading of
+# evidence/self-check.tsv; never edited by hand.
+kind: check-run/1
+engine: web
+browser: "HeadlessChrome/157.0.0.0"
+time: "2026-11-14 00:09:52"
+checks:
+  - id: boots
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: shot
+    result: pass
+    evidence:
+      - "evidence/play.png"
+  - id: outlines
+    result: pass
+    evidence:
+      - "evidence/figures.png"
+  - id: brief-words
+    result: pass
+    why: "missed; first-person: the raymarched first-person look mode is optional and later (Out of scope); yours: not a look word (from the Question line)"
+    evidence:
+      - "evidence/brief-words.tsv"
+  - id: emoji
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: nearest-game
+    result: pass
+    evidence:
+      - "evidence/nearest-game.txt"
+brief_checklist:
+  - id: L1
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "Look: everything ASCII on a canvas character grid in one crisp monospace font. Terrain shaded with a long character-density ramp, hillshaded by the current sun azimuth/elevation, with long real cast shadows at low sun; pitch-black shadowed crater with faint blue `·` frost. Limited palette: 5–6 greys for regolith, amber/white for the Sun and lit faces, blue/white Earth, phosphor-green UI, black star field, subtle CRT glow and scanlines. Box-drawing borders, gauges as `[████░░]`, hand-made ASCII title logo. Signature detail: a detailed ASCII Earth disc showing its phase hanging over the skyline strip, and sun glare streaks when the Sun clips a ridge. Animated dish and panels tracking Earth and Sun, footprints, landing dust, transmit pulse. Every figure drawn in characters: no images, no emoji, no plain circles."
+  - id: L2
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "References: the real lunar south pole (Shackleton rim, Connecting Ridge, the low sun) *(guessed)*; classic roguelike ASCII readability *(guessed)*."
+  - id: L3
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "View: 2D · Camera: top-down map, with a 360° skyline panorama strip above it."
+  - id: F1
+    result: pass
+    evidence: "evidence/orbit.png"
+    item: "Orbit scout: ASCII map of the site, a live 360° skyline from the scout's position, up to 3 flags with each site's sunlit % and Earth visibility, time scrub to preview the sky, then land."
+  - id: F2
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "Horizon sky model: placeholder Sun and Earth tracks (low Sun circling, Earth wobbling) occluded by the heightmap horizon; instrument bar with sun elevation, time to sunset/Earthset, Earth visibility."
+  - id: F3
+    result: pass
+    evidence: "index.html:579"
+    item: "Turn-based surface: steps and work cost mission time; five stations: hab, solar array (low-power wait), survey (needs Sun), drill (needs battery reserve, pays more in the shadowed crater), dish (needs Earth); battery drains in the dark and cold."
+  - id: F4
+    result: pass
+    evidence: "config.js:83"
+    item: "Three short missions: learn the horizon, get science home, the trade-off; Mission 3's 12-hour launch slip sends you back to orbit to re-pick or hold; radio messages from mission control."
+  - id: F5
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "ASCII art pass: hillshade, cast shadows, crater frost, phased Earth disc, sun glare, animated dish and panels, footprints, landing dust, transmit pulse, CRT glow, ASCII title, HUD and end screens."
+  - id: F6
+    result: not_run
+    mark: not assessed
+    why: "synth sound and generative music are built (warm, cold, home, tension layers; mute on M) but cannot be heard by the check"
+    evidence: "index.html:musicUpdate"
+    item: "Synthesized sound and generative music that follow the sky (warm in Sun, cold in shadow, home layer while Earth is visible, tension near set); mute toggle."
+  - id: S1
+    result: pass
+    evidence: "evidence/orbit.png"
+    item: "scouting from orbit with flags and time-warp · in the slice"
+  - id: S2
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "360° skyline and horizon occlusion of the Sun and Earth · in the slice"
+  - id: S3
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "power and battery · in the slice"
+  - id: S4
+    result: pass
+    evidence: "index.html:579"
+    item: "science: survey, drill, transmit · in the slice"
+  - id: S5
+    result: pass
+    evidence: "index.html:456"
+    item: "three missions and the 12-hour launch slip · in the slice"
+  - id: S6
+    result: not_run
+    mark: not assessed
+    why: "built with Web Audio; sound cannot be checked by a screenshot"
+    evidence: "index.html:audioInit"
+    item: "generative music and synthesized sound · in the slice"
+  - id: M1
+    result: pass
+    evidence: "evidence/title.png"
+    item: "The title logo types itself in with typewriter clicks and radio static."
+  - id: M2
+    result: pass
+    evidence: "evidence/orbit.png"
+    item: "Mission 1 opens in orbit over the site: the skyline strip shows the Sun sitting just above a ridge, and the hint reads \"Move the scout."
+  - id: M3
+    result: pass
+    evidence: "config.js:83"
+    item: "Watch the sky.\""
+  - id: M4
+    result: pass
+    evidence: "evidence/orbit.png"
+    item: "Moving one way, the Sun sinks behind a ridge and the map's shadows swing; the other way, it clears."
+  - id: M5
+    result: pass
+    evidence: "index.html:973"
+    item: "The player plants a flag where the Sun is clear and presses Enter."
+  - id: M6
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "Landing dust, a thump, the hab appears."
+  - id: M7
+    result: pass
+    evidence: "index.html:579"
+    item: "They step to the survey station and press E: science ticks up while the instrument bar shows SUN VISIBLE."
+  - id: M8
+    result: pass
+    evidence: "index.html:829"
+    item: "A few turns later the Sun's track nears a ridge shoulder, the bar turns amber, \"SUNSET 6h\", and the music thins and turns cold."
+  - id: M9
+    result: pass
+    evidence: "evidence/surface.png"
+    item: "The ridge, not the clock, is what ends the day."
+  - id: C1
+    result: not_run
+    mark: not assessed
+    why: "Mission 1 sunset time depends on the site picked; not timed by the check"
+    evidence: "config.js:1"
+    item: "Mission 1 is gentle: one sunset around minute 3, and enough battery to wait it out at the array."
+  - id: C2
+    result: pass
+    evidence: "index.html:558"
+    item: "Mission 2 adds Earthset: science you collected but have not transmitted is worth nothing until you send it before Earth slips behind the ridge."
+  - id: C3
+    result: pass
+    evidence: "config.js:1"
+    item: "Mission 3 is the full trade-off: the shadowed terrace pays most but drains the battery in the cold, and a 12-hour launch slip moves the whole sky."
+  - id: C4
+    result: pass
+    evidence: "index.html:530"
+    item: "If the battery hits zero, the mission ends early and you keep only what was transmitted."
+  - id: C5
+    result: pass
+    evidence: "index.html:530"
+    item: "Each mission ends at its departure time."
+  - id: C6
+    result: not_run
+    mark: not assessed
+    why: "a provenance note, not a game line"
+    item: "*(provisional, from \"in between\")*"
+measures:
+  - id: step-time
+    value: 123.300
+    unit: ms
+    by: browser
+    detail: "mean 1.260 ms, slowest 123.300 ms, 206 steps"

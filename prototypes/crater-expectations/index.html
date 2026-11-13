@@ -1,0 +1,1414 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: Is racing a sky that the terrain hides tense and readable, and does scouting from orbit make the landing choice feel like yours? -->
+<!-- Date: 2026-11-13 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crater Expectations</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Crater Expectations: an ASCII lunar south-pole mission sim.
+// Everything on screen is a character on a 142x45 grid. The terrain is an analytic heightfield
+// (SITE in config.js); horizons are ray-marched from it with lunar curvature; the Sun and Earth
+// follow illustrative (placeholder) tracks. Numbers are illustrative, not a flight prediction.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value });
+const STEP = 1 / 60;
+const W = 1280, H = 720;
+const PIXEL = false;
+const FONT = '"DejaVu Sans Mono", Consolas, "Courier New", monospace';
+const TITLE = 'Crater Expectations';
+const CONTROLS = [
+  'ORBIT    arrows/WASD move scout   F plant flag   [ ] landing hour   V ground view (Q/E look)   ENTER land',
+  'SURFACE  W/S walk forward/back (0.5h a step)   A/D look around   E work station   Z wait 1h   V top-down map',
+  'ANY      M mute   ESC pause   ENTER continue dialogs',
+];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 };
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() {
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = [];
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() {
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = !PIXEL;
+}
+addEventListener('resize', fit); fit();
+
+// ---- The character grid ---------------------------------------------------------------
+const COLS = 142, ROWS = 45, CW = 9, CHH = 16, NCELL = COLS * ROWS;
+const OS = CHEAP ? 1 : 2; // offscreen oversampling for crisp glyphs
+const off = document.createElement('canvas');
+off.width = W * OS; off.height = H * OS;
+const octx = off.getContext('2d');
+octx.setTransform(OS, 0, 0, OS, 0, 0);
+octx.font = `15px ${FONT}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
+octx.fillStyle = '#000'; octx.fillRect(0, 0, W, H);
+const gCh = new Array(NCELL).fill(' '), gFg = new Array(NCELL).fill('#000');
+const dCh = new Array(NCELL).fill(''), dFg = new Array(NCELL).fill('');
+const BLOCK = { '█': 1, '▇': 7 / 8, '▆': 6 / 8, '▅': 5 / 8, '▄': 4 / 8, '▃': 3 / 8, '▂': 2 / 8, '▁': 1 / 8 };
+const PARTIAL = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+// The fine layer: twice the columns and rows (4x the characters) on the same screen. Terrain, sky
+// and Earth are drawn here; text and markers stay on the coarse grid, which covers the fine cells under it.
+// Fine cells are near-square (4.5 x 4 px): 2 across and 4 down per text cell, 8x the characters.
+// They hold dot characters (. · ∙ • ●) whose size and colour carry the light: a dot-matrix look.
+const FX = 2, FY = 4;
+const FCOLS = COLS * FX, FROWS = ROWS * FY, FW = CW / FX, FH = CHH / FY, NFINE = FCOLS * FROWS;
+const DOTR = { '.': 0.17, '·': 0.25, '∙': 0.33, '•': 0.43, '●': 0.56 }; // dot radius, share of the cell
+const DOTS = ['.', '·', '∙', '•', '●'];
+const dotOf = k => DOTS[Math.max(0, Math.min(4, Math.floor(k * 5)))]; // brightness 0..1 to a dot
+const fCh = new Array(NFINE).fill(' '), fFg = new Array(NFINE).fill('#000');
+const fdCh = new Array(NFINE).fill(''), fdFg = new Array(NFINE).fill('');
+const NB = ' '; // a coarse "solid blank": hides the fine layer under it
+function put(c, r, ch, fg) {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return;
+  const i = r * COLS + c; gCh[i] = ch; gFg[i] = fg;
+}
+/** Put one character on the fine (half-size) grid. */
+function fput(c, r, ch, fg) {
+  c = Math.floor(c); r = Math.floor(r);
+  if (c < 0 || r < 0 || c >= FCOLS || r >= FROWS) return;
+  const i = r * FCOLS + c; fCh[i] = ch; fFg[i] = fg;
+}
+/** A coarse label over a fine view: its spaces hide the view so the text stays readable. */
+function lab(c, r, s, fg, cmin = 1, cmax = COLS - 2) {
+  c = Math.max(cmin, Math.min(cmax - s.length + 1, c));
+  for (let i = 0; i < s.length; i++) put(c + i, r, s[i] === ' ' ? NB : s[i], fg);
+}
+function str(c, r, s, fg) { for (let i = 0; i < s.length; i++) put(c + i, r, s[i], fg); }
+function strC(r, s, fg, c0 = 0, w = COLS) { str(c0 + Math.floor((w - s.length) / 2), r, s, fg); }
+function clearGrid() { gCh.fill(' '); gFg.fill('#000'); fCh.fill(' '); fFg.fill('#000'); }
+function fillRect(c, r, w, h, ch = ' ', fg = '#000') {
+  for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) {
+    put(x, y, ch, fg);
+    for (let k = 0; k < FX * FY; k++) fput(FX * x + (k % FX), FY * y + Math.floor(k / FX), ' ', '#000');
+  }
+}
+function box(c, r, w, h, fg, title, tfg, rtitle) {
+  put(c, r, '┌', fg); put(c + w - 1, r, '┐', fg); put(c, r + h - 1, '└', fg); put(c + w - 1, r + h - 1, '┘', fg);
+  for (let x = c + 1; x < c + w - 1; x++) { put(x, r, '─', fg); put(x, r + h - 1, '─', fg); }
+  for (let y = r + 1; y < r + h - 1; y++) { put(c, y, '│', fg); put(c + w - 1, y, '│', fg); }
+  if (title) { put(c + 2, r, '┤', fg); str(c + 3, r, ' ' + title + ' ', tfg || fg); put(c + 5 + title.length, r, '├', fg); }
+  if (rtitle) { const x = c + w - 4 - rtitle.length; put(x - 1, r, '┤', fg); str(x, r, ' ' + rtitle + ' ', tfg || fg); put(x + rtitle.length + 2, r, '├', fg); }
+}
+function bottomText(c, r, w, s, fg) { str(c + w - 3 - s.length, r, ' ' + s + ' ', fg); }
+function wrap(text, w) {
+  const out = []; let line = '';
+  for (const word of text.split(' ')) {
+    if ((line + ' ' + word).trim().length > w) { out.push(line.trim()); line = word; } else line += ' ' + word;
+  }
+  if (line.trim()) out.push(line.trim());
+  return out;
+}
+function glyph(ch, fg, x, y, w, h, fine) {
+  octx.fillStyle = fg;
+  const b = BLOCK[ch], dr = fine ? DOTR[ch] : undefined;
+  if (dr !== undefined) { octx.beginPath(); octx.arc(x + w / 2, y + h / 2, dr * Math.min(w, h) * 1.05, 0, 6.2832); octx.fill(); }
+  else if (b !== undefined) octx.fillRect(x, y + h * (1 - b), w, h * b);
+  else if (ch === '▀') octx.fillRect(x, y, w, h / 2);
+  else if (ch === '│') octx.fillRect(x + w / 2 - 0.5, y, 1, h);
+  else if (ch === '─') octx.fillRect(x, y + h / 2 - 0.5, w, 1);
+  else octx.fillText(ch, x + w / 2, y + h / 2 + 1);
+}
+const FONT_C = `15px ${FONT}`, FONT_F = `bold 6px ${FONT}`;
+const dirty = new Int32Array(NCELL);
+/** Redraw only the coarse cells whose character, or any of their fine cells, changed. */
+function flush() {
+  let n = 0;
+  for (let i = 0; i < NCELL; i++) {
+    const c = i % COLS, r = (i / COLS) | 0, f0 = FY * r * FCOLS + FX * c;
+    let ch = gCh[i] !== dCh[i] || gFg[i] !== dFg[i];
+    for (let k = 0; k < FX * FY; k++) {
+      const j = f0 + (k % FX) + Math.floor(k / FX) * FCOLS;
+      if (fCh[j] !== fdCh[j] || fFg[j] !== fdFg[j]) { ch = true; fdCh[j] = fCh[j]; fdFg[j] = fFg[j]; }
+    }
+    if (!ch) continue;
+    dCh[i] = gCh[i]; dFg[i] = gFg[i]; dirty[n++] = i;
+  }
+  octx.font = FONT_C;
+  for (let k = 0; k < n; k++) {
+    const i = dirty[k], x = (i % COLS) * CW, y = ((i / COLS) | 0) * CHH, ch = gCh[i];
+    octx.fillStyle = '#000'; octx.fillRect(x, y, CW, CHH);
+    if (ch !== ' ' && ch !== NB) glyph(ch, gFg[i], x, y, CW, CHH);
+  }
+  octx.font = FONT_F;
+  for (let k = 0; k < n; k++) {
+    const i = dirty[k]; if (gCh[i] !== ' ') continue; // coarse text covers the fine cells
+    const c = i % COLS, r = (i / COLS) | 0, f0 = FY * r * FCOLS + FX * c;
+    for (let q = 0; q < FX * FY; q++) {
+      const a = q % FX, b = Math.floor(q / FX), j = f0 + a + b * FCOLS, ch = fCh[j];
+      if (ch !== ' ') glyph(ch, fFg[j], (FX * c + a) * FW, (FY * r + b) * FH, FW, FH, true);
+    }
+  }
+}
+// CRT: scanlines + vignette, drawn once
+const scan = document.createElement('canvas'); scan.width = W; scan.height = H;
+{
+  const s = scan.getContext('2d');
+  s.fillStyle = 'rgba(0,0,0,0.22)';
+  for (let y = 0; y < H; y += 3) s.fillRect(0, y, W, 1);
+  const g = s.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.95);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+  s.fillStyle = g; s.fillRect(0, 0, W, H);
+}
+const fx = { sun: null, earth: null }; // glare positions in px, set by composeSky
+function present() {
+  flush();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  if (!CHEAP) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.6;
+    ctx.filter = 'blur(3px)'; ctx.drawImage(off, 0, 0, W, H); ctx.restore();
+  }
+  ctx.drawImage(off, 0, 0, W, H);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  if (fx.sun) {
+    const { x, y, clip } = fx.sun, rad = clip ? 70 : 42;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    g.addColorStop(0, 'rgba(255,220,150,0.55)'); g.addColorStop(1, 'rgba(255,140,40,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    if (clip) { // glare streak along the ridge line
+      const lg = ctx.createLinearGradient(x - 260, 0, x + 260, 0);
+      lg.addColorStop(0, 'rgba(255,170,60,0)'); lg.addColorStop(0.5, 'rgba(255,200,120,0.5)'); lg.addColorStop(1, 'rgba(255,170,60,0)');
+      ctx.fillStyle = lg; ctx.fillRect(x - 260, y - 2, 520, 4);
+      ctx.fillRect(x - 1.5, y - 30, 3, 60);
+    }
+  }
+  if (fx.earth) {
+    const { x, y } = fx.earth, g = ctx.createRadialGradient(x, y, 0, x, y, 30);
+    g.addColorStop(0, 'rgba(120,180,255,0.35)'); g.addColorStop(1, 'rgba(60,120,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 30, y - 30, 60, 60);
+  }
+  ctx.restore();
+  ctx.drawImage(scan, 0, 0);
+}
+
+// ---- Palette ---------------------------------------------------------------------------
+const C = {
+  ui: '#5dff9a', uiDim: '#2b8a55', uiDark: '#174a2e', amber: '#ffb347', amberDim: '#7a5420',
+  sun: '#fff4cc', earth: '#8fd0ff', earthDim: '#24476b', white: '#e8eef5', grey: '#8a929e',
+  red: '#ff5a3c', frost: '#3a6aa0', star: '#9aa4b4', starDim: '#4a5260',
+};
+
+// ---- Input ------------------------------------------------------------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code);
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('pointerdown', () => startAudio());
+addEventListener('blur', () => down.clear());
+const MOVES = {
+  ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1],
+  ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0],
+};
+let holdT = 0;
+function moveInput(dt) {
+  for (const k in MOVES) if (pressed(k)) { holdT = -0.22; return MOVES[k]; }
+  let held = null;
+  for (const k in MOVES) if (down.has(k)) held = MOVES[k];
+  if (!held) { holdT = 0; return null; }
+  holdT += dt;
+  if (holdT >= tune.hold_repeat) { holdT = 0; return held; }
+  return null;
+}
+const rep = {};
+/** True on a press of any of the keys, then again every `interval` seconds while one is held. */
+function repeatKey(name, codes, dt, interval) {
+  if (codes.some(pressed)) { rep[name] = -0.2; return true; }
+  if (!codes.some(k => down.has(k))) { rep[name] = 0; return false; }
+  rep[name] = (rep[name] || 0) + dt;
+  if (rep[name] >= interval) { rep[name] = 0; return true; }
+  return false;
+}
+const DIR8 = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+const DIRN = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const dir8 = hd => Math.round((((hd % 360) + 360) % 360) / 45) % 8;
+function angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
+
+// ---- Audio: everything heard through the suit, radio and structure ------------------------
+let audio = null, muted = false, music = null, noiseBuf = null, arng = 987654;
+function arand() { arng = (Math.imul(arng, 1103515245) + 12345) & 0x7fffffff; return arng / 0x7fffffff; }
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+    try { audioInit(); } catch (e) { /* a stub context may not build the graph */ }
+  }
+  if (audio.ac.state === 'suspended' && audio.ac.resume) audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function audioInit() {
+  const ac = audio.ac;
+  noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = arand() * 2 - 1;
+  // the "radio space": a filtered feedback delay
+  const delay = ac.createDelay(1.5); delay.delayTime.value = 0.42;
+  const fb = ac.createGain(); fb.gain.value = 0.42;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1700;
+  delay.connect(lp); lp.connect(fb); fb.connect(delay);
+  const wet = ac.createGain(); wet.gain.value = 0.5; lp.connect(wet); wet.connect(audio.out);
+  const bus = ac.createGain(); bus.gain.value = tune.music_volume; bus.connect(audio.out);
+  const send = ac.createGain(); send.gain.value = 0.6; send.connect(delay);
+  const mk = () => { const g = ac.createGain(); g.gain.value = 0; g.connect(bus); g.connect(send); return g; };
+  const warm = mk(), cold = mk(), home = mk(), tens = mk();
+  // warm drone: A major-ish triad, gently beating
+  const wlp = ac.createBiquadFilter(); wlp.type = 'lowpass'; wlp.frequency.value = 620; wlp.connect(warm);
+  [110, 164.81, 277.18, 110.6].forEach((f, i) => {
+    const o = ac.createOscillator(); o.type = i === 2 ? 'sine' : 'triangle'; o.frequency.value = f;
+    const g = ac.createGain(); g.gain.value = i === 2 ? 0.12 : 0.22; o.connect(g); g.connect(wlp); o.start();
+  });
+  // tension: low saw with tremolo and a rubbing minor second
+  const tlp = ac.createBiquadFilter(); tlp.type = 'lowpass'; tlp.frequency.value = 340;
+  const trem = ac.createGain(); trem.gain.value = 0.5; tlp.connect(trem); trem.connect(tens);
+  [55, 58.27].forEach(f => { const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const g = ac.createGain(); g.gain.value = 0.25; o.connect(g); g.connect(tlp); o.start(); });
+  const lfo = ac.createOscillator(); lfo.frequency.value = 2.2; const lg = ac.createGain(); lg.gain.value = 0.45; lfo.connect(lg); lg.connect(trem.gain); lfo.start();
+  music = { warm, cold, home, tens, bus, delay: send, nextPing: 0, nextNote: 0, nextBreath: 0, note: 2, last: 0 };
+}
+function env(g, t, a, peak, rel) { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + rel); }
+function osc(type, f, t, a, peak, rel, dest, f2) {
+  const ac = audio.ac, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + a + rel);
+  env(g, t, a, peak, rel); o.connect(g); g.connect(dest || audio.out); o.start(t); o.stop(t + a + rel + 0.05);
+}
+function noise(t, dur, type, freq, peak, q = 1, a = 0.005, dest) {
+  const ac = audio.ac, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; f.Q.value = q;
+  env(g, t, a, peak, dur); s.connect(f); f.connect(g); g.connect(dest || audio.out);
+  s.start(t, arand()); s.stop(t + a + dur + 0.05);
+}
+const sfx = {
+  ok() { return audio && noiseBuf && !muted; },
+  click() { if (!this.ok()) return; const t = audio.ac.currentTime; if (t - (music.last || 0) < 0.03) return; music.last = t; noise(t, 0.02, 'highpass', 3200, 0.07); },
+  beep(f = 1320) { if (!this.ok()) return; osc('sine', f, audio.ac.currentTime, 0.005, 0.1, 0.08); },
+  telemetry() { if (!this.ok()) return; const t = audio.ac.currentTime; osc('sine', 1760, t, 0.004, 0.06, 0.05); osc('sine', 2093, t + 0.09, 0.004, 0.05, 0.05); },
+  servo() { if (!this.ok()) return; const t = audio.ac.currentTime; osc('sawtooth', 140, t, 0.01, 0.035, 0.12, null, 190); noise(t, 0.08, 'lowpass', 400, 0.05); },
+  thump() { if (!this.ok()) return; const t = audio.ac.currentTime; osc('sine', 130, t, 0.005, 0.8, 0.7, null, 32); noise(t, 0.6, 'lowpass', 260, 0.5); noise(t + 0.05, 1.2, 'lowpass', 900, 0.08, 1, 0.2); },
+  drill() {
+    if (!this.ok()) return; const t = audio.ac.currentTime;
+    for (let i = 0; i < 9; i++) { osc('sawtooth', 62 + (i % 3) * 7, t + i * 0.16, 0.01, 0.12, 0.15); noise(t + i * 0.16, 0.14, 'bandpass', 1300 + (i % 2) * 400, 0.12, 2); }
+  },
+  chirp() { if (!this.ok()) return; const t = audio.ac.currentTime; for (let i = 0; i < 6; i++) osc('sine', 700 + i * 190, t + i * 0.075, 0.005, 0.09, 0.07, null); },
+  static(d = 0.35) { if (!this.ok()) return; noise(audio.ac.currentTime, d, 'bandpass', 2400, 0.06, 0.6); },
+  warn() { if (!this.ok()) return; const t = audio.ac.currentTime; osc('square', 440, t, 0.005, 0.05, 0.14); osc('square', 330, t + 0.17, 0.005, 0.05, 0.2); },
+  survey() { if (!this.ok()) return; const t = audio.ac.currentTime; [880, 1108, 1318].forEach((f, i) => osc('triangle', f, t + i * 0.1, 0.005, 0.08, 0.25)); },
+};
+const PENTA = [293.66, 329.63, 369.99, 440, 493.88, 587.33, 659.25];
+const PINGS = [880, 987.77, 1318.5, 1760, 1174.66];
+function musicUpdate(mood) {
+  if (!audio || !music || !noiseBuf) return;
+  const ac = audio.ac, t = ac.currentTime;
+  music.bus.gain.setTargetAtTime(tune.music_volume, t, 0.3);
+  const set = (g, v) => g.gain.setTargetAtTime(v, t, 1.2);
+  set(music.warm, mood.warm ? 0.55 : 0);
+  set(music.cold, mood.cold ? 0.9 : 0);
+  set(music.home, mood.home ? 0.8 : 0);
+  set(music.tens, mood.tension ? 0.35 : 0);
+  if (muted) return;
+  if (mood.cold && t > music.nextPing) {
+    osc('sine', PINGS[Math.floor(arand() * PINGS.length)], t, 0.01, 0.12, 2.4, music.cold);
+    music.nextPing = t + 1.6 + arand() * 2.8;
+  }
+  if (mood.home && t > music.nextNote) {
+    music.note = Math.max(0, Math.min(PENTA.length - 1, music.note + Math.floor(arand() * 5) - 2));
+    osc('triangle', PENTA[music.note], t, 0.04, 0.16, 1.1, music.home);
+    if (arand() < 0.3) osc('sine', PENTA[music.note] / 2, t, 0.05, 0.08, 1.8, music.home);
+    music.nextNote = t + (arand() < 0.5 ? 0.55 : 1.1);
+  }
+  if (mood.breath && t > music.nextBreath) { // suit breathing: inhale, exhale
+    noise(t, 1.0, 'lowpass', 520, 0.035, 0.7, 0.8); noise(t + 1.9, 1.3, 'lowpass', 380, 0.03, 0.7, 0.5);
+    music.nextBreath = t + 4.6 + arand() * 1.2;
+  }
+}
+
+// ---- Terrain: an analytic heightfield (km) --------------------------------------------
+const D2R = Math.PI / 180, R2D = 180 / Math.PI, MOON_R = 1737.4;
+const MC = 100, MR = 26; // map cells
+const MAP_C0 = 1, MAP_R0 = 15; // grid position of map cell 0,0
+function hash2(ix, iy) {
+  let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) ^ 0x5bd1e995;
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+const craters = [];
+{ // small craters from a fixed terrain seed (the site never changes with ?seed)
+  let s = 7;
+  const r = () => { s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let i = 0; i < SITE.small_craters; i++) craters.push({ x: -2 + r() * 34, y: -1 + r() * 16, r: 0.35 + r() * 0.8 });
+}
+function bowl(d, R, depth, rim, rimW) {
+  if (d < R) { const q = d / R; return -depth * (1 - q * q) + rim; }
+  const e = (d - R) / rimW; return rim * Math.exp(-e * e);
+}
+function height(x, y) {
+  const S = SITE.shackleton, Rg = SITE.ridge, T = SITE.terrace;
+  let z = bowl(Math.hypot(x - S.x, y - S.y), S.r, S.depth, S.rim, 2.5);
+  // connecting ridge
+  const vx = Rg.x1 - Rg.x0, vy = Rg.y1 - Rg.y0, L2 = vx * vx + vy * vy;
+  let t = ((x - Rg.x0) * vx + (y - Rg.y0) * vy) / L2; t = Math.max(0, Math.min(1, t));
+  const dr = Math.hypot(x - Rg.x0 - vx * t, y - Rg.y0 - vy * t) / Rg.w;
+  z += Rg.h * Math.exp(-dr * dr) * (t > 0.85 ? (1 - t) / 0.15 : 1) * (0.85 + 0.15 * Math.sin(t * 9));
+  z += bowl(Math.hypot(x - T.x, y - T.y), T.r, T.depth, T.rim, 0.9);
+  for (const f of SITE.far) { const dx = (x - f.x) / f.s, dy = (y - f.y) / f.s; z += f.h * Math.exp(-dx * dx - dy * dy); }
+  for (const c of craters) {
+    const d = Math.hypot(x - c.x, y - c.y);
+    if (d < c.r * 2.2) z += bowl(d, c.r, c.r * 0.35, c.r * 0.08, c.r * 0.4);
+  }
+  z += SITE.noise_amp * (vnoise(x / 4, y / 4) * 2 - 1) + SITE.noise_amp * 0.18 * (vnoise(x / 1.4 + 9, y / 1.4) * 2 - 1);
+  return z;
+}
+// Cached height grids for fast lookups: fine (80 m) around the site, coarse (500 m) out to the far skyline.
+function mkGrid(x0, y0, x1, y1, q) {
+  const nx = Math.round((x1 - x0) / q) + 1, ny = Math.round((y1 - y0) / q) + 1, a = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) a[j * nx + i] = height(x0 + i * q, y0 + j * q);
+  return { x0, y0, q, nx, ny, a };
+}
+const HGF = mkGrid(-14, -12, 48, 28, 0.08), HGC = mkGrid(-110, -110, 140, 125, 0.5);
+function sampleGrid(g, x, y) {
+  const fx = (x - g.x0) / g.q, fy = (y - g.y0) / g.q;
+  if (fx < 0 || fy < 0 || fx >= g.nx - 1 || fy >= g.ny - 1) return NaN;
+  const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, k = iy * g.nx + ix, a = g.a;
+  return (a[k] * (1 - tx) + a[k + 1] * tx) * (1 - ty) + (a[k + g.nx] * (1 - tx) + a[k + g.nx + 1] * tx) * ty;
+}
+/** Terrain height (km) from the cached grids; exact height() outside them. */
+function hgt(x, y) {
+  let v = sampleGrid(HGF, x, y);
+  if (v !== v) v = sampleGrid(HGC, x, y);
+  return v !== v ? height(x, y) : v;
+}
+const DISTS = []; for (let d = 0.15; d < 95; d *= 1.09) DISTS.push(d);
+const CURV = DISTS.map(d => d * d / (2 * MOON_R));
+const HM = new Float32Array(MC * MR);
+for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) HM[r * MC + c] = height(c * SITE.cell_x, r * SITE.cell_y);
+const NAZ = 144;
+const profCache = new Map();
+/** Horizon elevation (deg) all around a map cell, 144 azimuths, with lunar curvature. */
+function profile(c, r) {
+  const key = r * MC + c;
+  let p = profCache.get(key);
+  if (p) return p;
+  p = new Float32Array(NAZ);
+  const x0 = c * SITE.cell_x, y0 = r * SITE.cell_y, h0 = HM[key] + 0.002;
+  for (let a = 0; a < NAZ; a++) {
+    const az = (a + 0.5) * 360 / NAZ * D2R, sx = Math.sin(az), sy = -Math.cos(az);
+    let m = -1;
+    for (let k = 0; k < DISTS.length; k++) {
+      const d = DISTS[k], s = (height(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d;
+      if (s > m) m = s;
+    }
+    p[a] = Math.atan(m) * R2D;
+  }
+  profCache.set(key, p);
+  return p;
+}
+function horizonAt(p, az) {
+  let f = ((az % 360) + 360) % 360 / 360 * NAZ - 0.5;
+  const i0 = Math.floor(f), w = f - i0;
+  return p[(i0 + NAZ) % NAZ] * (1 - w) + p[(i0 + 1) % NAZ] * w;
+}
+// permanently shadowed cells: the horizon beats the highest the Sun ever gets, all the way round
+const PSR = new Uint8Array(MC * MR);
+for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) {
+  const i = r * MC + c; if (HM[i] > -0.15) continue;
+  const x0 = c * SITE.cell_x, y0 = r * SITE.cell_y, h0 = HM[i];
+  let psr = 1;
+  for (let a = 0; a < 36 && psr; a++) {
+    const az = a * 10 * D2R, sx = Math.sin(az), sy = -Math.cos(az);
+    const sunMax = Math.tan((1.6 - tune.colat * Math.cos(az)) * D2R);
+    let blocked = 0;
+    for (let k = 0; k < DISTS.length; k += 2) {
+      const d = DISTS[k]; if ((height(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d > sunMax) { blocked = 1; break; }
+    }
+    if (!blocked) psr = 0;
+  }
+  PSR[i] = psr;
+}
+
+// ---- Sky: illustrative Sun and Earth tracks ---------------------------------------------
+function mission(mi) { return MISSIONS[mi === undefined ? state.mi : mi]; }
+/** Sun azimuth/elevation at mission hour t. Site off the pole: elevation dips toward the pole side (az 0). */
+function sunAt(t, mi) {
+  const m = mission(mi), az = ((m.sun_az0 + tune.sun_rate * t) % 360 + 360) % 360;
+  return { az, el: m.decl - tune.colat * Math.cos(az * D2R) };
+}
+/** Earth hangs low over the near side; libration rocks it up and down, left and right. */
+function earthAt(t, mi) {
+  const m = mission(mi), P = tune.lib_period;
+  const az = ((m.earth_az + tune.lib_lon_amp * Math.sin(2 * Math.PI * (t + m.lib_lon_phase) / (P * 1.01))) % 360 + 360) % 360;
+  const el = tune.lib_amp * Math.sin(2 * Math.PI * (t + m.lib_phase) / P) - tune.colat * Math.cos(az * D2R);
+  return { az, el };
+}
+function earthPhase(sun, earth) { // fraction of Earth's disc lit, seen from the Moon
+  let d = Math.abs(sun.az - earth.az) % 360; if (d > 180) d = 360 - d;
+  return { frac: (1 - Math.cos(d * D2R)) / 2, sep: d, side: ((sun.az - earth.az + 540) % 360) - 180 > 0 ? 1 : -1 };
+}
+function visible(p, body) { return body.el > horizonAt(p, body.az); }
+function nextChange(p, which, t0, vis0, mi) {
+  for (let h = 0.5; h <= 200; h += 0.5) {
+    const b = which === 'sun' ? sunAt(t0 + h, mi) : earthAt(t0 + h, mi);
+    if (visible(p, b) !== vis0) return h;
+  }
+  return null;
+}
+function siteStats(c, r, L, D) {
+  const p = profile(c, r); let s = 0, e = 0, n = 0; const tl = [];
+  for (let h = 0; h <= D; h += 1) { n++; if (visible(p, sunAt(L + h))) s++; if (visible(p, earthAt(L + h))) e++; }
+  for (let b = 0; b < 20; b++) {
+    const t = L + (b + 0.5) * D / 20, sv = visible(p, sunAt(t)), ev = visible(p, earthAt(t));
+    tl.push(sv && ev ? 3 : sv ? 1 : ev ? 2 : 0);
+  }
+  return { sun: Math.round(100 * s / n), earth: Math.round(100 * e / n), tl };
+}
+
+// ---- Lighting the map: cast shadows + hillshade from the real sun direction --------------
+/** Is the point (km, height h) in the shadow of the terrain for a Sun in direction (ssx, ssy)? */
+function shadowed(x, y, h, ssx, ssy, tanS) {
+  for (let k = 0; k < DISTS.length; k += DISTS[k] > 4 ? 2 : 1) {
+    const d = DISTS[k]; if ((hgt(x + ssx * d, y + ssy * d) - CURV[k] - h) / d > tanS) return true;
+  }
+  return false;
+}
+/** Lit ground: brightness k (0..1) to a regolith colour, warming toward the Sun-facing slopes. */
+function litColor(k) {
+  const g = 70 + k * 180, warm = Math.max(0, (k - 0.55) * 2.2);
+  return `rgb(${Math.round(g + warm * (255 - g))},${Math.round(g + warm * (214 - g))},${Math.round(g + warm * (165 - g))})`;
+}
+/** Hillshade from a height gradient (hx, hy in km/km, map y down) and the Sun's direction. */
+function shade(hx, hy, sx, sy, cE, sE) {
+  const dot = ((-hx * sx - hy * sy) * cE + sE) / Math.sqrt(hx * hx + hy * hy + 1);
+  return Math.max(0.04, Math.min(1, Math.pow(Math.max(0, 0.08 + dot / 0.3), 0.75)));
+}
+// The map in dots: each map cell is FX x FY fine cells, each relit from its own sub-cell height.
+const FMC = MC * FX, FMR = MR * FY;
+const subX = i => ((i + 0.5) / FX - 0.5) * SITE.cell_x, subY = j => ((j + 0.5) / FY - 0.5) * SITE.cell_y;
+const mapFH = new Float32Array(FMC * FMR);
+for (let j = 0; j < FMR; j++) for (let i = 0; i < FMC; i++) mapFH[j * FMC + i] = height(subX(i), subY(j));
+const mapCh = new Array(FMC * FMR).fill(' '), mapFg = new Array(FMC * FMR).fill('#000');
+let lightKey = '';
+function relight(t) {
+  const sun = sunAt(t), key = state.mi + ':' + sun.az.toFixed(2);
+  if (key === lightKey) return; lightKey = key;
+  const az = sun.az * D2R, sx = Math.sin(az), sy = -Math.cos(az), tanEl = Math.tan(sun.el * D2R);
+  const cE = Math.cos(sun.el * D2R), sE = Math.sin(sun.el * D2R);
+  const dx = SITE.cell_x / FX, dy = SITE.cell_y / FY;
+  for (let j = 0; j < FMR; j++) for (let i = 0; i < FMC; i++) {
+    const n = j * FMC + i, x0 = subX(i), y0 = subY(j), h0 = mapFH[n] + 0.002;
+    const H = (a, b) => mapFH[Math.max(0, Math.min(FMR - 1, b)) * FMC + Math.max(0, Math.min(FMC - 1, a))];
+    if (!shadowed(x0, y0, h0, sx, sy, tanEl)) {
+      const k = shade((H(i + 1, j) - H(i - 1, j)) / (2 * dx), (H(i, j + 1) - H(i, j - 1)) / (2 * dy), sx, sy, cE, sE);
+      const kt = Math.min(1, k * (0.86 + 0.28 * vnoise(x0 * 7, y0 * 7)));
+      mapCh[n] = dotOf(kt); mapFg[n] = litColor(kt);
+    } else if (PSR[Math.floor(j / FY) * MC + Math.floor(i / FX)]) { // frost in the never-lit floor
+      const hsh = hash2(i * 3 + 1, j * 7 + 2);
+      mapCh[n] = hsh < 0.12 ? '·' : hsh < 0.16 ? '.' : ' '; mapFg[n] = hsh < 0.12 ? C.frost : '#1f3b5c';
+    } else { // earthshine: faint contour dots in the dark
+      const band = Math.floor(mapFH[n] / 0.15);
+      if (band !== Math.floor(H(i - 1, j) / 0.15) || band !== Math.floor(H(i, j - 1) / 0.15)) { mapCh[n] = '·'; mapFg[n] = '#2c3644'; }
+      else if (hash2(i, j) < 0.06) { mapCh[n] = '.'; mapFg[n] = '#1d232c'; } else { mapCh[n] = ' '; mapFg[n] = '#000'; }
+    }
+  }
+}
+
+// ---- State ------------------------------------------------------------------------------
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = { t: 0, score: 0, gained: '', scores: [], anim: 0 };
+  startMission(0, false);
+}
+function landSlope(c, r) {
+  return Math.max(...[[1, 0], [0, 1]].map(([dc, dr]) => Math.abs(HM[Math.min(MR - 1, r + dr) * MC + Math.min(MC - 1, c + dc)] - HM[r * MC + c]) / (dc ? SITE.cell_x : SITE.cell_y)));
+}
+/** The scout starts over the nearest safe ground where the Sun is just clear of the skyline. */
+function findStart(mi) {
+  const [c0, r0] = SITE.start_cursor;
+  for (let rad = 0; rad < 40; rad++) for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
+    if (Math.max(Math.abs(dc), Math.abs(dr)) !== rad) continue;
+    const c = c0 + dc, r = r0 + dr;
+    if (c < 3 || r < 1 || c > MC - 4 || r > MR - 2 || PSR[r * MC + c] || landSlope(c, r) > tune.land_slope_max) continue;
+    if (visible(profile(c, r), sunAt(0, mi))) return { c, r };
+  }
+  return { c: c0, r: r0 };
+}
+function startMission(mi, keepScores = true) {
+  const sc0 = findStart(mi), sc = [sc0.c, sc0.r];
+  Object.assign(state, {
+    mi, phase: 'orbit', cursor: { c: sc[0], r: sc[1] }, flags: [], landOff: 0, landMin: 0, slipDone: false,
+    t: 0, land: null, depart: 0, player: null, battery: tune.battery_start, data: 0, sent: 0, calibrated: false,
+    uses: {}, foot: new Set(), msgs: [], particles: [], pulses: [], vfx: [], prev: null, endKind: null, statCache: new Map(),
+    view: 'map', hd: Math.round(sunAt(0, mi).az / tune.turn_step) * tune.turn_step % 360,
+    dialog: { title: `MISSION ${mi + 1}/3 · ${MISSIONS[mi].name}`, text: MISSIONS[mi].brief, shown: 0 },
+  });
+  if (!keepScores) state.scores = [];
+  state.score = state.scores.reduce((a, s) => a + (s ? s.sent : 0), 0);
+  lightKey = ''; updateSky();
+  radio('CAPCOM: Scout is in orbit over the south pole. Sky strip is live.', C.ui);
+}
+function radio(text, color = C.ui) {
+  state.msgs.push({ text, color, shown: 0 });
+  if (state.msgs.length > 12) state.msgs.shift();
+  sfx.static(0.2);
+}
+function cellProf(p) { return profile(p.c, p.r); }
+function updateSky() {
+  const orbit = state.phase === 'orbit';
+  const cell = orbit ? state.cursor : state.player, t = orbit ? state.landOff : state.t;
+  const p = cellProf(cell), sun = sunAt(t), earth = earthAt(t);
+  const sunVis = visible(p, sun), earthVis = visible(p, earth);
+  const sky = {
+    p, t, sun, earth, sunVis, earthVis, hzSun: horizonAt(p, sun.az), hzEarth: horizonAt(p, earth.az),
+    sunNext: nextChange(p, 'sun', t, sunVis), earthNext: nextChange(p, 'earth', t, earthVis),
+    phase: earthPhase(sun, earth),
+  };
+  if (!orbit) {
+    const lp = cellProf(state.land);
+    sky.lSun = visible(lp, sun); sky.lEarth = visible(lp, earth);
+    sky.lEarthNext = nextChange(lp, 'earth', t, sky.lEarth);
+    sky.cold = !mapLitAt(state.player, t);
+  }
+  state.sky = sky;
+  relight(t);
+}
+function mapLitAt(cell, t) { return visible(cellProf(cell), sunAt(t)); }
+function statsFor(c, r) {
+  const key = `${c},${r},${state.landOff}`;
+  let s = state.statCache.get(key);
+  if (!s) { s = siteStats(c, r, state.landOff, mission().duration); state.statCache.set(key, s); }
+  return s;
+}
+
+// ---- Stations ------------------------------------------------------------------------------
+function stationAt(c, r) {
+  if (state.land) {
+    const L = state.land;
+    if (r === L.r && c === L.c) return { kind: 'hab', name: 'HAB' };
+    if (r === L.r && c === L.c - 2) return { kind: 'array', name: 'SOLAR ARRAY' };
+    if (r === L.r && c === L.c + 2) return { kind: 'dish', name: 'DISH' };
+  }
+  const find = (list, kind, name) => { const i = list.findIndex(s => s[0] === c && s[1] === r); return i < 0 ? null : { kind, name: `${name} ${i + 1}`, id: kind + i }; };
+  return find(SITE.survey, 'survey', 'SURVEY OUTCROP') || find(SITE.drill, 'drill', 'DRILL SITE') || find(SITE.psr_drill, 'psr', 'TERRACE DRILL');
+}
+function usesLeft(id) { return state.uses[id] === undefined ? tune.station_uses : state.uses[id]; }
+
+// ---- Turns ------------------------------------------------------------------------------
+function advance(hours, mode) {
+  const lp = cellProf(state.land), pp = cellProf(state.player);
+  let left = hours;
+  while (left > 1e-6 && !state.endKind) {
+    const dt = Math.min(0.25, left); left -= dt; state.t += dt;
+    const sun = sunAt(state.t);
+    const charge = visible(lp, sun) ? tune.charge_rate : 0;
+    const cold = !visible(pp, sun);
+    const drain = mode === 'rest' ? tune.drain_base * tune.rest_factor : tune.drain_base + (cold ? tune.drain_cold : 0);
+    state.battery = Math.max(0, Math.min(100, state.battery + (charge - drain) * dt));
+    if (state.battery <= 0) endMission('dead');
+    else if (state.t >= state.depart - 1e-6) endMission('depart');
+  }
+  const prev = state.sky;
+  updateSky();
+  const s = state.sky;
+  if (!state.endKind && prev) {
+    if (prev.sunVis && !s.sunVis) { radio('SUIT: Sun has slipped behind the skyline. You are in shadow. Cold drain rising.', C.amber); sfx.warn(); }
+    if (!prev.sunVis && s.sunVis) radio('SUIT: Sunlight on the visor. Survey is go here.', C.amber);
+    if (prev.lEarth && !s.lEarth) { radio('DISH: Earth is below the skyline at the lander. Link lost.', C.earth); sfx.warn(); }
+    if (!prev.lEarth && s.lEarth) { radio('DISH: Earth has cleared the ridge. Link acquired.', C.earth); sfx.telemetry(); }
+    if (prev.lSun && !s.lSun) radio('ARRAY: Panels are dark. Battery on its own now.', C.amber);
+    if (!prev.lSun && s.lSun) radio('ARRAY: Panels see the Sun. Charging.', C.amber);
+    const toDep = state.depart - state.t;
+    if (toDep <= 6 && toDep + hours > 6) { radio(`CAPCOM: Departure in ${toDep.toFixed(1)} h. Only science that reaches Earth counts.`, C.red); sfx.warn(); }
+    if (state.battery < 20 && state.battery + hours * 3 >= 20) { radio('SUIT: Battery under 20%. Rest at the array (E) or get to sunlight.', C.red); sfx.warn(); }
+  }
+}
+function endMission(kind) {
+  if (state.endKind) return;
+  state.endKind = kind;
+  state.scores[state.mi] = { sent: Math.round(state.sent), lost: Math.round(state.data), kind };
+  state.score = state.scores.reduce((a, s) => a + (s ? s.sent : 0), 0);
+  state.gained = `Mission ${state.mi + 1}: ${Math.round(state.sent)} science sent home`;
+  events.push({ type: kind === 'dead' ? 'fail' : 'mission_end', mission: state.mi + 1, sent: state.sent });
+  scene = kind === 'dead' ? 'over' : 'results';
+  if (kind === 'dead') { sfx.warn(); } else sfx.chirp();
+}
+function tryStep(dc, dr) {
+  const p = state.player, c = p.c + dc, r = p.r + dr;
+  if (c < 0 || r < 0 || c >= MC || r >= MR) return;
+  const rise = Math.abs(HM[r * MC + c] - HM[p.r * MC + p.c]) / Math.hypot(dc * SITE.cell_x, dr * SITE.cell_y);
+  if (rise > tune.slope_max) { radio(`SUIT: Too steep (${Math.round(Math.atan(rise) * R2D)}°). Find another way.`, C.red); sfx.warn(); return; }
+  state.foot.add(p.r * MC + p.c);
+  p.c = c; p.r = r;
+  state.battery = Math.max(0, state.battery - tune.drain_step);
+  sfx.servo();
+  advance(tune.step_hours, 'walk');
+}
+function act() {
+  const p = state.player, st = stationAt(p.c, p.r), s = state.sky;
+  if (!st) { radio('SUIT: Nothing to work here. Walk onto a station: [S] survey, [D] drill, or the lander.', C.uiDim); return; }
+  if (st.kind === 'hab') {
+    if (!s.lSun) { radio('HAB: Calibration needs sunlight on the lander. Wait for the Sun.', C.amber); sfx.warn(); return; }
+    state.calibrated = true; radio('HAB: Instruments calibrated. Next survey pays more.', C.ui); sfx.beep(990); advance(tune.calibrate_hours, 'work');
+  } else if (st.kind === 'array') {
+    radio(`ARRAY: Low-power wait, ${tune.rest_hours} h. ${s.lSun ? 'Charging.' : 'No sun: slow drain.'}`, C.amber); sfx.servo(); advance(tune.rest_hours, 'rest');
+  } else if (st.kind === 'dish') {
+    if (!s.lEarth) { radio('DISH: Earth is hidden by the skyline. Nobody to talk to.', C.earth); sfx.warn(); return; }
+    if (state.data <= 0) { radio('DISH: Link is up but you have no data to send.', C.earth); return; }
+    const n = Math.min(state.data, tune.transmit_rate);
+    state.data -= n; state.sent += n; state.battery = Math.max(0, state.battery - tune.transmit_cost);
+    state.pulses.push({ t: 0 }); sfx.chirp();
+    radio(`DISH: ${Math.round(n)} points sent home. ${Math.round(state.data)} still on the suit.`, C.earth);
+    events.push({ type: 'transmit', n });
+    advance(tune.transmit_hours, 'work');
+  } else if (st.kind === 'survey') {
+    if (usesLeft(st.id) <= 0) { radio('SUIT: This outcrop is fully surveyed.', C.uiDim); return; }
+    if (!s.sunVis) { radio('SUIT: Sun is hidden here. Survey needs light. Wait (Z) or move.', C.amber); sfx.warn(); return; }
+    const y = tune.survey_yield * (state.calibrated ? tune.calibrate_bonus : 1);
+    state.data += y; state.calibrated = false; state.uses[st.id] = usesLeft(st.id) - 1;
+    state.battery = Math.max(0, state.battery - tune.survey_cost);
+    sparkle(C.amber); sfx.survey(); radio(`SURVEY: +${Math.round(y)} points on the suit. Get them to the dish.`, C.amber);
+    advance(tune.survey_hours, 'work');
+  } else if (st.kind === 'drill' || st.kind === 'psr') {
+    if (usesLeft(st.id) <= 0) { radio('DRILL: Site exhausted.', C.uiDim); return; }
+    if (state.battery < tune.drill_reserve) { radio(`DRILL: Needs ${tune.drill_reserve}% battery reserve.`, C.red); sfx.warn(); return; }
+    const y = tune.drill_yield * (st.kind === 'psr' ? tune.psr_drill_mult : 1);
+    state.data += y; state.uses[st.id] = usesLeft(st.id) - 1;
+    state.battery = Math.max(0, state.battery - tune.drill_cost);
+    sparkle(st.kind === 'psr' ? C.frost : C.white); sfx.drill();
+    radio(`DRILL: Core recovered, +${Math.round(y)} points${st.kind === 'psr' ? ' (frozen volatiles!)' : ''}.`, st.kind === 'psr' ? C.earth : C.white);
+    advance(tune.drill_hours, 'work');
+  }
+}
+function sparkle(color) {
+  const p = state.player;
+  for (let i = 0; i < 14; i++) state.particles.push({ x: p.c, y: p.r, vx: (rng() - 0.5) * 8, vy: (rng() - 0.5) * 4, life: 0.8 + rng() * 0.5, ch: rng() < 0.5 ? '*' : '+', color });
+  burst(0.5, 0.86, 40, 0.25, color, ['•', '∙', '●']);
+}
+/** First-person particles, in view coordinates (u, v from 0 to 1): they fly on ballistic arcs, no air. */
+function burst(u, v, n, spread, color, chars) {
+  for (let i = 0; i < n; i++) state.vfx.push({
+    u: u + (rng() - 0.5) * spread * 0.4, v: v - rng() * 0.03, vu: (rng() - 0.5) * spread * 1.6, vv: -(0.15 + rng() * 0.45),
+    life: 0.8 + rng() * 0.9, ch: chars[Math.floor(rng() * chars.length)], color,
+  });
+}
+function land() {
+  const c = Math.max(2, Math.min(MC - 3, state.cursor.c)), r = state.cursor.r;
+  const rise = landSlope(c, r);
+  if (rise > tune.land_slope_max || PSR[r * MC + c]) { radio(`LANDER: Unsafe ground (${PSR[r * MC + c] ? 'permanent shadow' : 'slope ' + Math.round(Math.atan(rise) * R2D) + '°'}). Pick flatter, lit ground.`, C.red); sfx.warn(); return; }
+  if (state.mi === 2 && !state.slipDone && tune.slip_hours > 0) {
+    state.slipDone = true; state.landMin = state.landOff + tune.slip_hours; state.landOff = state.landMin;
+    state.statCache.clear(); updateSky(); sfx.warn();
+    state.dialog = { title: `LAUNCH SLIP +${tune.slip_hours}h`, text: `CAPCOM: Hold, hold, hold. A valve on the descent stage needs a recheck. Your landing slips ${tune.slip_hours} hours. The Sun and Earth have moved along the skyline; your flags have been re-scored for the new hour. Re-pick a site, or hold this one. ENTER to land when ready.`, shown: 0 };
+    radio(`CAPCOM: Landing slipped ${tune.slip_hours} h. Watch the sky move.`, C.red);
+    return;
+  }
+  state.phase = 'surface'; state.land = { c, r }; state.player = { c, r };
+  state.t = state.landOff; state.depart = state.landOff + mission().duration;
+  for (let i = 0; i < 46; i++) { const a = rng() * Math.PI * 2, v = 3 + rng() * 9; state.particles.push({ x: c, y: r, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.55, life: 0.7 + rng() * 0.9, ch: ",.'`"[Math.floor(rng() * 4)], color: '#b8b0a0' }); }
+  sfx.thump(); events.push({ type: 'landed', c, r, t: state.t });
+  state.view = 'pov'; state.hd = Math.round(sunAt(state.t).az / tune.turn_step) * tune.turn_step % 360;
+  burst(0.5, 0.97, 90, 1.4, '#b8b0a0', ['.', '·', '∙', '•']);
+  updateSky();
+  radio(`LANDER: Touchdown at T+${state.t}h. ${state.sky.lSun ? 'Panels lit.' : 'Panels DARK.'} ${state.sky.lEarth ? 'Earth in view.' : 'Earth hidden.'} Departure T+${state.depart}h.`, C.ui);
+}
+
+// ---- Drawing ----------------------------------------------------------------------------
+const SKY_R0 = 2, SKY_ROWS = 10, SKY_C0 = 1, SKY_COLS = 140, EL_MAX = 5.2, EL_MIN = -1.3;
+function fmtH(h) { return h === null ? '>200h' : h < 10 ? h.toFixed(1) + 'h' : Math.round(h) + 'h'; }
+function sgn(v, d = 2) { return (v >= 0 ? '+' : '') + v.toFixed(d); }
+const SUN_RAMP = ['#7a3a10', '#c0601c', '#ff9a3a', '#ffc76a', '#ffe7a8', '#fffbe8'];
+/**
+ * The Sun as a dot-matrix disc: a white-hot core, limb-darkened to amber, a corona of fading dots
+ * and eight thin rays. (cx, cy) is the centre in fine cells, R its radius in fine columns.
+ * clip(fc, fr) says whether a fine cell is open sky; dim draws it as a ghost behind the ridge.
+ */
+function sunDisc(cx, cy, R, clip, dim, t) {
+  const RY = R * FW / FH, ext = R * 2.6, ey = ext * FW / FH;
+  for (let y = -Math.ceil(ey); y <= Math.ceil(ey); y++) for (let x = -Math.ceil(ext); x <= Math.ceil(ext); x++) {
+    const fc = cx + x, fr = cy + y;
+    if (clip && !clip(fc, fr)) continue;
+    const nx = x / R, ny = y / RY, q = Math.sqrt(nx * nx + ny * ny);
+    if (dim) { if (q > 0.85 && q < 1.15 && hash2(x + 40, y + 40) < 0.7) fput(fc, fr, '·', C.amberDim); continue; }
+    if (q <= 1) { // limb darkening: brightness falls toward the edge
+      const I = 0.35 + 0.65 * Math.sqrt(1 - q * q);
+      fput(fc, fr, I > 0.8 ? '●' : I > 0.6 ? '•' : '∙', SUN_RAMP[Math.min(5, Math.floor(I * 6))]);
+    } else { // corona and rays
+      const a = Math.atan2(ny, nx), ray = Math.pow(Math.abs(Math.cos(a * 4 + t * 0.2)), 40);
+      const fall = Math.max(0, 1 - (q - 1) / 1.6), k = fall * fall * (0.55 + ray * 1.2) - hash2(x * 5 + 1, y * 3 + 2) * 0.35;
+      if (k > 0.05) fput(fc, fr, k > 0.55 ? '•' : k > 0.3 ? '∙' : k > 0.15 ? '·' : '.', k > 0.4 ? '#ffd890' : k > 0.2 ? '#d08a3a' : '#7a4a1c');
+    }
+  }
+}
+/**
+ * The Earth as a dot-matrix disc showing its true phase: oceans, land and cloud turn with the hours,
+ * the night side stays black. RX is the radius in fine columns.
+ */
+function earthDisc(cx, cy, RX, sun, earth, vis, t, clip) {
+  const ph = earthPhase(sun, earth), th = (180 - ph.sep) * D2R;
+  const Lx = Math.sin(th) * ph.side, Lz = Math.cos(th), RY = RX * FW / FH, rot = t * 15;
+  for (let y = -Math.ceil(RY); y <= Math.ceil(RY); y++) for (let x = -Math.ceil(RX); x <= Math.ceil(RX); x++) {
+    const nx = x / RX, ny = y / RY, q = nx * nx + ny * ny;
+    if (q > 1) continue;
+    const fc = cx + x, fr = cy + y;
+    if (clip && !clip(fc, fr)) continue;
+    if (!vis) { if (q > 0.8) fput(fc, fr, '.', C.earthDim); continue; }
+    const nz = Math.sqrt(1 - q), I = nx * Lx + nz * Lz;
+    if (I <= 0.03) { if (q > 0.9 && hash2(x, y) < 0.5) fput(fc, fr, '.', '#13284a'); continue; }
+    const lon = Math.atan2(nx, nz) * R2D + rot, lat = Math.asin(Math.max(-1, Math.min(1, -ny))) * R2D;
+    const land = vnoise(lon / 38 + 50, lat / 30 + 20) > 0.6, ice = Math.abs(lat) > 68;
+    const cl = vnoise(lon / 18 + 3 + t * 0.02, lat / 9 + 8) * 0.7 + vnoise(lon / 7, lat / 5) * 0.3;
+    const k = Math.min(1, I * 1.15 + 0.05);
+    let col;
+    if (cl > 0.62 || ice) col = k > 0.6 ? '#f4f8ff' : k > 0.3 ? '#b8c8dc' : '#5d6e84';
+    else if (land) col = k > 0.6 ? '#a89a5c' : k > 0.3 ? '#6f6a3e' : '#3c3a24';
+    else col = k > 0.6 ? '#4a9cff' : k > 0.3 ? '#2a6ac0' : '#173c70';
+    fput(fc, fr, dotOf(Math.min(0.99, k * (cl > 0.62 ? 1.1 : 0.95))), col);
+  }
+}
+/** The 360° skyline strip: the real horizon from the cell, in dots, with the Sun and Earth on it. */
+function composeSky(p, sun, earth, r0 = SKY_R0, rowsC = SKY_ROWS, withFx = true) {
+  const NF = rowsC * FY, fr0 = r0 * FY, fc0 = SKY_C0 * FX, NCF = SKY_COLS * FX, rowH = (EL_MAX - EL_MIN) / NF;
+  const colOf = az => fc0 + Math.floor((((az % 360) + 360) % 360) / 360 * NCF) % NCF;
+  const elOf = fr => EL_MAX - (fr - fr0 + 0.5) * rowH;
+  const hzc = new Float32Array(NCF);
+  const sunVis = visible(p, sun), hzSun = horizonAt(p, sun.az), clip = sunVis && sun.el - hzSun < 0.7;
+  for (let i = 0; i < NCF; i++) {
+    const az = (i + 0.5) * 360 / NCF, hz = hzc[i] = horizonAt(p, az);
+    const dS = Math.abs(angDiff(az, sun.az)), glow = clip && dS < 14;
+    for (let k = 0; k < NF; k++) {
+      const top = EL_MAX - k * rowH, bot = top - rowH, fc = fc0 + i, fr = fr0 + k;
+      if (hz >= top) { // the ridge: bright dots on the crest, fading into the body
+        const depth = (hz - top) / rowH, f = Math.max(0, 1 - depth / 14) - hash2(i * 3, k * 5) * 0.25;
+        if (f > 0.05) fput(fc, fr, glow && depth < 3 ? (dS < 5 ? '●' : '•') : dotOf(f * 0.75), glow && depth < 3 ? (dS < 5 ? '#ffcf7a' : '#a8743a') : f > 0.6 ? '#8a929e' : f > 0.3 ? '#555c68' : '#30353d');
+      } else if (hz > bot) { // the crest line, sized by how much of the cell it fills
+        fput(fc, fr, dotOf(0.35 + (hz - bot) / rowH * 0.6), glow ? '#ffd890' : '#b4bcc8');
+      } else {
+        const hs = hash2(i * 13 + 5, k * 31 + 7);
+        if (Math.abs(top - rowH / 2) < rowH / 2 && i % 4 === 0) fput(fc, fr, '·', C.uiDark); // 0° ideal horizon
+        else if (hs < 0.012) fput(fc, fr, '.', C.starDim); else if (hs < 0.017) fput(fc, fr, '·', C.star); else if (hs < 0.019) fput(fc, fr, '•', C.white);
+      }
+    }
+  }
+  const sky = (fc, fr) => fr >= fr0 && fr < fr0 + NF && elOf(fr) > hzc[(((fc - fc0) % NCF) + NCF) % NCF];
+  // the Sun
+  const sc = colOf(sun.az), sr = fr0 + Math.max(1, Math.min(NF - 2, Math.floor((EL_MAX - sun.el) / rowH)));
+  if (sunVis) { sunDisc(sc, sr, 3.2, sky, false, state.anim); if (withFx) fx.sun = { x: (sc + 0.5) * FW, y: (sr + 0.5) * FH, clip }; }
+  else sunDisc(sc, sr, 3.2, null, true, 0);
+  // the Earth, cut by the ridge where it sinks behind it
+  const ec = colOf(earth.az), er = fr0 + Math.max(4, Math.min(NF - 5, Math.floor((EL_MAX - earth.el) / rowH)));
+  const ev = visible(p, earth);
+  earthDisc(ec, er, 5, sun, earth, ev, state.anim * 0.3, ev ? sky : null);
+  if (ev && withFx) fx.earth = { x: (ec + 0.5) * FW, y: (er + 0.5) * FH };
+  return { sunCol: Math.floor(sc / FX), ec: Math.floor(ec / FX), sunVis, ev };
+}
+function composeSkyLabels(r, info) {
+  for (let a = 0; a < 360; a += 45) { const c = SKY_C0 + Math.floor(a / 360 * SKY_COLS); put(c, r, '╵', C.uiDim); str(c + 1, r, a + '°', C.uiDim); }
+  str(Math.max(1, Math.min(130, info.sunCol - 1)), r, info.sunVis ? '^SUN' : '^sun(hidden)', info.sunVis ? C.amber : C.amberDim);
+  str(Math.max(1, Math.min(124, info.ec - 1)), r, info.ev ? '^EARTH' : '^earth(hidden)', info.ev ? C.earth : C.earthDim);
+}
+
+// ---- First person: a 360° dot-matrix panorama ray-marched from the heightfield --------------
+// Rendered once per position and hour (turning only slides the window), with real cast shadows.
+const PANO = { key: '', p: null };
+function povGeom(rows) {
+  const dpc = tune.pov_fov / 200, dpr = tune.pov_deg_row;
+  return { dpc, dpr, N: Math.round(360 / dpc), hr: Math.round(rows * tune.pov_horizon), vex: (dpc * FH / FW) / dpr };
+}
+function renderPano(c, r, t, rows) {
+  const key = [c, r, t.toFixed(2), rows, state.mi, tune.pov_fov, tune.pov_deg_row, tune.pov_horizon].join();
+  if (PANO.key === key) return PANO.p;
+  const { dpc, dpr, N, hr } = povGeom(rows);
+  const x0 = c * SITE.cell_x, y0 = r * SITE.cell_y, h0 = hgt(x0, y0) + 0.0018;
+  const sun = sunAt(t), sa = sun.az * D2R, ssx = Math.sin(sa), ssy = -Math.cos(sa), tanS = Math.tan(sun.el * D2R);
+  const cE = Math.cos(sun.el * D2R), sE = Math.sin(sun.el * D2R);
+  const ea = earthAt(t), eaz = ea.az * D2R, esx = Math.sin(eaz), esy = -Math.cos(eaz), eC = Math.cos(Math.max(0, ea.el) * D2R), eS = Math.sin(Math.max(0.5, ea.el) * D2R);
+  const n = N * rows, ch = new Array(n), fg = new Array(n), dep = new Float32Array(n).fill(1e9), top = new Float32Array(N);
+  for (let row = 0; row < rows; row++) for (let col = 0; col < N; col++) { // stars, fixed to the sky
+    const h = hash2(col * 7 + 3, (row - hr) * 13 + 1), i = row * N + col;
+    ch[i] = h < 0.006 ? '.' : h < 0.009 ? '·' : h < 0.0105 ? '•' : ' ';
+    fg[i] = h < 0.006 ? C.starDim : h < 0.009 ? C.star : C.white;
+  }
+  const bottom = (rows - hr) * dpr, dStart = Math.max(0.002, 0.0018 / Math.tan(Math.min(80, bottom) * D2R) * 0.7);
+  const shCache = new Map();
+  for (let col = 0; col < N; col++) {
+    const az = (col + 0.5) * dpc * D2R, sx = Math.sin(az), sy = -Math.cos(az);
+    let yb = rows, d = dStart, topF = rows, lastFg = '#000', lastD = 0;
+    while (d < 95 && yb > 0) {
+      const x = x0 + sx * d, y = y0 + sy * d, hr0 = hgt(x, y), yf = hr - Math.atan2(hr0 - d * d / (2 * MOON_R) - h0, d) * R2D / dpr;
+      if (yf < yb) {
+        const q = Math.max(0.02, d * 0.012), sk = Math.round(x / q) + ',' + Math.round(y / q) + ',' + Math.round(Math.log(q) * 4);
+        let sh = shCache.get(sk);
+        if (sh === undefined) { sh = shadowed(x, y, hr0 + 0.001, ssx, ssy, tanS); shCache.set(sk, sh); }
+        let dot, col0;
+        const e = Math.max(0.03, d * 0.006), gx = (hgt(x + e, y) - hgt(x - e, y)) / (2 * e), gy = (hgt(x, y + e) - hgt(x, y - e)) / (2 * e);
+        if (!sh) {
+          let k = shade(gx, gy, ssx, ssy, cE, sE);
+          if (d < 2) k *= 0.72 + 0.56 * vnoise(x * 90, y * 90); // regolith grain up close
+          k = Math.min(1, k * (0.9 + 0.2 * vnoise(x * 9, y * 9)));
+          dot = k; col0 = litColor(k);
+        } else {
+          const ci = Math.round(x / SITE.cell_x), ri = Math.round(y / SITE.cell_y);
+          const psr = ci >= 0 && ri >= 0 && ci < MC && ri < MR && PSR[ri * MC + ci];
+          // earthshine: the shadowed ground lit faintly blue by the Earth, so its relief still reads
+          const ke = shade(gx, gy, esx, esy, eC, eS) * (d < 2 ? 0.75 + 0.5 * vnoise(x * 90, y * 90) : 1);
+          dot = -1 - Math.min(0.99, ke); col0 = psr ? C.frost : `rgb(${Math.round(34 + ke * 46)},${Math.round(40 + ke * 56)},${Math.round(54 + ke * 80)})`;
+        }
+        const r0 = Math.max(0, Math.ceil(yf));
+        for (let row = r0; row < yb; row++) {
+          const i = row * N + col;
+          if (dot >= 0) { ch[i] = dotOf(dot); fg[i] = col0; }
+          else { const hs = hash2(col * 3 + row, row * 7 + col), ke = -1 - dot; ch[i] = col0 === C.frost ? (hs < 0.16 ? '·' : hs < 0.5 ? '.' : ' ') : hs < 0.35 + ke * 0.6 ? dotOf(ke * 0.55) : ' '; fg[i] = col0; }
+          dep[i] = d;
+        }
+        topF = yf; yb = r0; lastFg = dot >= 0 ? col0 : '#3a414d'; lastD = d;
+      }
+      d += Math.max(0.0015, d * 0.016);
+    }
+    top[col] = Math.max(0, topF);
+    if (yb > 0 && topF < yb) { // the crest dot, sized by how much of its cell the terrain fills
+      const i = (yb - 1) * N + col, frac = yb - topF;
+      if (frac > 0.15) { ch[i] = dotOf(0.2 + frac * 0.7); fg[i] = lastFg; dep[i] = lastD; }
+    }
+  }
+  PANO.key = key; PANO.p = { ch, fg, dep, top, N, x0, y0, h0 };
+  return PANO.p;
+}
+function gauge(v, n) { const f = Math.round(v / 100 * n); return '[' + '█'.repeat(f) + '░'.repeat(n - f) + ']'; }
+function battColor(v) { return v > 50 ? C.ui : v > 25 ? C.amber : C.red; }
+
+function composeHeader() {
+  str(1, 0, 'CRATER EXPECTATIONS', C.amber);
+  str(22, 0, `│ MISSION ${state.mi + 1}/3 · ${mission().name} │ ${state.phase === 'orbit' ? 'ORBIT · SCOUTING' : 'SURFACE'}`, C.ui);
+  const right = `TOTAL SENT ${state.score + (scene === 'play' ? Math.round(state.sent) : 0)}  │ [M] ${muted ? 'SOUND OFF' : 'SOUND ON'}`;
+  str(COLS - 1 - right.length, 0, right, C.uiDim);
+}
+function composePlay() {
+  clearGrid(); fx.sun = null; fx.earth = null;
+  const s = state.sky, orbit = state.phase === 'orbit', pov = state.view === 'pov';
+  composeHeader();
+  const skyH = pov && !orbit ? 9 : 13; // on foot the visor view takes the room; the 360° strip stays
+  box(0, 1, COLS, skyH, C.uiDim, orbit ? 'SKY FROM SCOUT · 360° SKYLINE' : 'SKY FROM YOU · 360° SKYLINE', C.ui,
+    orbit ? `LANDING HOUR T+${state.landOff}h` : `T+${state.t.toFixed(1)}h`);
+  bottomText(0, skyH, COLS, 'ILLUSTRATIVE EPHEMERIS · TERRAIN RAY-MARCHED WITH LUNAR CURVATURE', C.uiDark);
+  const info = composeSky(s.p, s.sun, s.earth, 2, skyH - 3);
+  composeSkyLabels(skyH - 1, info);
+  const y0 = skyH + 1;
+  if (pov) composePovBox(y0); else composeMapBox(y0);
+  composePanel(y0);
+  composeBar();
+  if (state.dialog) composeDialog();
+}
+/** The top-down site map, in dots: 8 fine cells per map cell, stations and labels on top. */
+function composeMapBox(y0) {
+  const s = state.sky, orbit = state.phase === 'orbit';
+  box(0, y0, 102, 28, C.uiDim, orbit ? 'SOUTH POLE SITE · SCOUT VIEW · [V] GROUND VIEW' : 'SOUTH POLE SITE · [V] BACK TO YOUR VIEW', C.ui, '1 CELL ≈ 300 M');
+  const F0 = FX * MAP_C0, R0 = FY * MAP_R0;
+  for (let j = 0; j < FMR; j++) for (let i = 0; i < FMC; i++) { const n = j * FMC + i; if (mapCh[n] !== ' ') fput(F0 + i, R0 + j, mapCh[n], mapFg[n]); }
+  for (const L of SITE.labels) lab(MAP_C0 + L.c, MAP_R0 + L.r, L.text, C.uiDim);
+  for (const i of state.foot) { const c = i % MC, r = Math.floor(i / MC); fput(F0 + FX * c, R0 + FY * r + 1, '•', '#c9cfd6'); fput(F0 + FX * c + 1, R0 + FY * r + 2, '•', '#c9cfd6'); }
+  const stn = (list, kind, col, colDone) => list.forEach(([c, r], i) => {
+    const done = usesLeft(kind + i) <= 0, f = done ? colDone : col;
+    put(MAP_C0 + c - 1, MAP_R0 + r, '[', f); put(MAP_C0 + c, MAP_R0 + r, kind === 'survey' ? 'S' : 'D', f); put(MAP_C0 + c + 1, MAP_R0 + r, ']', f);
+  });
+  stn(SITE.survey, 'survey', C.amber, '#5a4a30'); stn(SITE.drill, 'drill', C.white, '#555'); stn(SITE.psr_drill, 'psr', '#6fb6ff', '#2a4060');
+  const edge = (az, ch, col) => { // edge markers for the Sun and Earth directions
+    const sx = Math.sin(az * D2R) / SITE.cell_x, sy = -Math.cos(az * D2R) / SITE.cell_y, m = Math.hypot(sx, sy);
+    let x = 50, y = 13; while (x >= 0 && x < MC && y >= 0 && y < MR) { x += sx / m; y += sy / m; }
+    put(Math.max(0, Math.min(101, Math.round(x) + 1)), Math.max(y0, Math.min(41, Math.round(y) + MAP_R0)), ch, col);
+  };
+  edge(s.sun.az, '*', s.sunVis ? C.amber : C.amberDim); edge(s.earth.az, 'O', s.earthVis ? C.earth : C.earthDim);
+  state.flags.forEach((f, i) => { put(MAP_C0 + f.c, MAP_R0 + f.r - 1, '▲', C.ui); put(MAP_C0 + f.c, MAP_R0 + f.r, String(i + 1), C.ui); });
+  if (state.land) composeLander();
+  if (orbit) {
+    const { c, r } = state.cursor, x = MAP_C0 + c, y = MAP_R0 + r, blink = Math.floor(state.anim * 3) % 2;
+    put(x - 2, y - 1, '┌', C.ui); put(x + 2, y - 1, '┐', C.ui); put(x - 2, y + 1, '└', C.ui); put(x + 2, y + 1, '┘', C.ui);
+    put(x, y, blink ? '+' : '×', C.ui);
+  } else {
+    const p = state.player, blink = Math.floor(state.anim * 2.5) % 2;
+    put(MAP_C0 + p.c, MAP_R0 + p.r, '@', blink ? '#ffffff' : '#bfe8ff');
+  }
+  for (const q of state.particles) { const x = q.x * FX, y = q.y * FY; if (x >= 0 && x < FMC && y >= 0 && y < FMR) fput(F0 + x, R0 + y, '•', q.color); }
+  for (const pl of state.pulses) { // transmit pulse rippling out toward Earth
+    const rad = pl.t * 14, L = state.land;
+    for (let a = -50; a <= 50; a += 2) {
+      const az = (s.earth.az + a) * D2R, x = (L.c + 2 + Math.sin(az) * rad) * FX, y = (L.r - Math.cos(az) * rad * 0.56) * FY;
+      if (x >= 0 && x < FMC && y >= 0 && y < FMR) fput(F0 + x, R0 + y, a % 6 === 0 ? '●' : '•', pl.t < 0.6 ? C.earth : C.earthDim);
+    }
+  }
+}
+/** What stands on the site, for the first-person view. */
+function povMarkers() {
+  const at = (c, r) => ({ x: c * SITE.cell_x, y: r * SITE.cell_y });
+  const out = [];
+  const add = (list, kind, tag, col, colDone) => list.forEach(([c, r], i) => out.push({ ...at(c, r), label: `${tag}${i + 1}`, color: usesLeft(kind + i) <= 0 ? colDone : col }));
+  add(SITE.survey, 'survey', 'S', C.amber, '#5a4a30'); add(SITE.drill, 'drill', 'D', C.white, '#666'); add(SITE.psr_drill, 'psr', 'TERRACE D', '#6fb6ff', '#2a4060');
+  if (state.land) {
+    const L = state.land;
+    out.push({ ...at(L.c, L.r), label: 'LANDER', color: C.white, lander: true });
+    out.push({ ...at(L.c - 2, L.r), label: 'ARRAY', color: state.sky.lSun ? C.amber : '#6a5a40' });
+    out.push({ ...at(L.c + 2, L.r), label: 'DISH', color: state.sky.lEarth ? C.earth : C.earthDim });
+  }
+  state.flags.forEach((f, i) => out.push({ ...at(f.c, f.r), label: `FLAG ${i + 1}`, color: C.ui }));
+  return out;
+}
+const LANDER_ART = [ // drawn in dots, bottom row on the ground
+  '   ●   ', '  •●•  ', '●●●●●●●', ' •███• ', '∙•   •∙',
+];
+/** The first-person visor view: terrain, Sun, Earth and stations, with a compass and a minimap. */
+function composePovBox(y0) {
+  const s = state.sky, orbit = state.phase === 'orbit', cell = orbit ? state.cursor : state.player, t = orbit ? state.landOff : state.t;
+  const rows = (40 - y0) * FY, w = (COLS - 42) * FX, fc0 = FX, fr0 = (y0 + 1) * FY;
+  const g = povGeom(rows), pano = renderPano(cell.c, cell.r, t, rows), hd = state.hd;
+  box(0, y0, 102, 42 - y0, C.uiDim, `${orbit ? 'GROUND VIEW FROM SCOUT' : 'YOUR VISOR'} · FACING ${DIRN[dir8(hd)]} ${Math.round(hd)}°`, C.ui, `VERTICAL ×${g.vex.toFixed(1)} · [V] MAP`);
+  const base = Math.round(hd / g.dpc - w / 2), N = g.N;
+  const pcol = i => (((base + i) % N) + N) % N;
+  for (let i = 0; i < w; i++) { const pc = pcol(i); for (let row = 0; row < rows; row++) { const k = row * N + pc; if (pano.ch[k] !== ' ') fput(fc0 + i, fr0 + row, pano.ch[k], pano.fg[k]); } }
+  const isSky = (fc, fr) => { const i = fc - fc0, row = fr - fr0; return i >= 0 && i < w && row >= 0 && row < rows && pano.dep[row * N + pcol(i)] >= 1e9; };
+  const proj = (az, el) => ({ i: Math.floor(w / 2 + angDiff(az, hd) / g.dpc), row: Math.floor(g.hr - el / g.dpr) });
+  // the Earth: real phase, three times its true size so it reads; cut by the ridge where it sets
+  const E = proj(s.earth.az, s.earth.el), eR = 0.95 * tune.earth_size / g.dpc;
+  if (Math.abs(E.i - w / 2) < w / 2 + eR) {
+    earthDisc(fc0 + E.i, fr0 + E.row, eR, s.sun, s.earth, true, state.anim * 0.3 + t, isSky);
+    if (s.earthVis) fx.earth = { x: (fc0 + E.i + 0.5) * FW, y: (fr0 + E.row + 0.5) * FH };
+  }
+  // the Sun: a dot-matrix disc with corona; a ghost ring when the ridge hides it
+  const S = proj(s.sun.az, s.sun.el), sR = 0.27 * tune.sun_size / g.dpc;
+  if (Math.abs(S.i - w / 2) < w / 2 + sR * 2.6) {
+    if (s.sunVis) { sunDisc(fc0 + S.i, fr0 + S.row, sR, isSky, false, state.anim); if (S.i >= 0 && S.i < w) fx.sun = { x: (fc0 + S.i + 0.5) * FW, y: (fr0 + S.row + 0.5) * FH, clip: s.sun.el - s.hzSun < 0.7 }; }
+    else sunDisc(fc0 + S.i, fr0 + S.row, sR, null, true, 0);
+  }
+  for (const pl of state.pulses) { // transmit pulse rings racing toward Earth
+    const rad = eR + pl.t * 26;
+    for (let a = 0; a < 360; a += 6) fput(fc0 + E.i + Math.cos(a * D2R) * rad, fr0 + E.row + Math.sin(a * D2R) * rad * FW / FH, '•', pl.t < 0.6 ? C.earth : C.earthDim);
+  }
+  // stations, lander and flags: a pole and a label where the line of sight is clear
+  for (const m of povMarkers()) {
+    const dx = m.x - pano.x0, dy = m.y - pano.y0, d = Math.hypot(dx, dy);
+    if (d < 0.08 || d > 20) continue;
+    const az = Math.atan2(dx, -dy) * R2D, rel = angDiff(az, hd);
+    if (Math.abs(rel) > tune.pov_fov / 2 - 1) continue;
+    const el = Math.atan2(hgt(m.x, m.y) - d * d / (2 * MOON_R) - pano.h0, d) * R2D;
+    const i = Math.floor(w / 2 + rel / g.dpc), row = Math.floor(g.hr - el / g.dpr - 0.4);
+    if (row < 2 || row >= rows) continue;
+    if (pano.dep[row * N + pcol(i)] < d * 0.9) continue; // hidden behind nearer ground
+    let topRow;
+    if (m.lander) {
+      LANDER_ART.forEach((ln, k) => [...ln].forEach((ch, x) => { if (ch !== ' ') fput(fc0 + i - 3 + x, fr0 + row - LANDER_ART.length + 1 + k, ch, k < 3 ? C.white : '#9aa4b4'); }));
+      topRow = row - LANDER_ART.length;
+    } else {
+      const ph = Math.max(4, Math.min(14, Math.round(3 + 1.5 / d)));
+      for (let k = 0; k < ph; k++) fput(fc0 + i, fr0 + row - k, '│', m.color);
+      fput(fc0 + i, fr0 + row - ph, '●', m.color);
+      topRow = row - ph - 1;
+    }
+    const txt = `${m.label} ${d < 1 ? Math.round(d * 1000) + 'm' : d.toFixed(1) + 'km'}`;
+    lab(Math.floor((fc0 + i) / FX) - Math.floor(txt.length / 2), Math.max(y0 + 1, Math.floor((fr0 + topRow) / FY)), txt, m.color, 1, 100);
+  }
+  for (const q of state.vfx) fput(fc0 + q.u * w, fr0 + q.v * rows, q.ch, q.color);
+  // compass on the bottom edge
+  const yb = 41;
+  for (let a = 0; a < 360; a += 15) {
+    const rel = angDiff(a, hd); if (Math.abs(rel) > tune.pov_fov / 2 - 2) continue;
+    const c = Math.floor((fc0 + w / 2 + rel / g.dpc) / FX);
+    if (a % 45 === 0) str(c - Math.floor(DIRN[a / 45].length / 2), yb, DIRN[a / 45], C.ui); else put(c, yb, '┴', C.uiDim);
+  }
+  const dirMark = (az, name, col) => {
+    const rel = angDiff(az, hd), c = Math.floor((fc0 + w / 2 + rel / g.dpc) / FX);
+    if (rel < -tune.pov_fov / 2) str(2, yb, `◄${name} ${Math.round(-rel)}°`, col);
+    else if (rel > tune.pov_fov / 2) { const t2 = `${name} ${Math.round(rel)}°►`; str(100 - t2.length, yb, t2, col); }
+    else put(c, yb, name === 'SUN' ? '*' : 'O', col);
+  };
+  dirMark(s.earth.az, 'EARTH', s.earthVis ? C.earth : C.earthDim);
+  dirMark(s.sun.az, 'SUN', s.sunVis ? C.amber : C.amberDim);
+  if (!orbit) composeMinimap();
+}
+/** A small top-down map in the visor's corner: where you are, which way you face, what is near. */
+function composeMinimap() {
+  const c0 = 68, r0 = 31, w = 33, h = 10;
+  fillRect(c0, r0, w, h, ' ', '#000');
+  box(c0, r0, w, h, C.uiDark, 'MAP', C.uiDim);
+  const p = state.player, W2 = (w - 2) * FX, H2 = (h - 2) * FY, f0 = (c0 + 1) * FX, g0 = (r0 + 1) * FY;
+  const pi = p.c * FX + 1, pj = p.r * FY + 2;
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+    const i = pi - W2 / 2 + x, j = pj - H2 / 2 + y;
+    if (i < 0 || j < 0 || i >= FMC || j >= FMR) continue;
+    const n = j * FMC + i; if (mapCh[n] !== ' ') fput(f0 + x, g0 + y, mapCh[n], mapFg[n]);
+  }
+  const mark = (c, r, ch, col) => { const x = c * FX + 1 - pi + W2 / 2, y = r * FY + 2 - pj + H2 / 2; if (x >= 1 && y >= 1 && x < W2 - 1 && y < H2 - 1) fput(f0 + x, g0 + y, ch, col); };
+  for (const i of state.foot) mark(i % MC, Math.floor(i / MC), '•', '#c9cfd6');
+  SITE.survey.forEach(([c, r], i) => mark(c, r, '●', usesLeft('survey' + i) > 0 ? C.amber : '#5a4a30'));
+  SITE.drill.forEach(([c, r], i) => mark(c, r, '●', usesLeft('drill' + i) > 0 ? C.white : '#555'));
+  SITE.psr_drill.forEach(([c, r], i) => mark(c, r, '●', usesLeft('psr' + i) > 0 ? '#6fb6ff' : '#2a4060'));
+  if (state.land) { mark(state.land.c, state.land.r, '●', C.ui); mark(state.land.c - 2, state.land.r, '●', C.amber); mark(state.land.c + 2, state.land.r, '●', C.earth); }
+  // view cone and you
+  for (const side of [-1, 1]) for (let k = 2; k < 12; k++) {
+    const a = (state.hd + side * tune.pov_fov / 2) * D2R;
+    fput(f0 + W2 / 2 + Math.sin(a) * k, g0 + H2 / 2 - Math.cos(a) * k * FW / FH * 1.6, '.', C.uiDim);
+  }
+  const blink = Math.floor(state.anim * 2.5) % 2;
+  fput(f0 + W2 / 2, g0 + H2 / 2, '●', blink ? '#ffffff' : '#bfe8ff');
+  const [dc, dr] = DIR8[dir8(state.hd)];
+  fput(f0 + W2 / 2 + dc * 2, g0 + H2 / 2 + dr * 3, '•', C.ui);
+  bottomText(c0, r0 + h - 1, w, 'S survey D drill', C.uiDark);
+}
+function composeLander() {
+  const L = state.land, x = MAP_C0 + L.c, y = MAP_R0 + L.r, s = state.sky;
+  const a8 = az => Math.round((((az % 360) + 360) % 360) / 45) % 8;
+  const panel = ['|', '/', '-', '\\', '|', '/', '-', '\\'][a8(s.sun.az + 90)];
+  const dish = ['^', '/', '>', '\\', 'v', '/', '<', '\\'][a8(s.earth.az)];
+  put(x - 2, y - 1, panel, s.lSun ? C.amber : '#6a5a40'); put(x - 3, y - 1, panel, s.lSun ? C.amber : '#6a5a40');
+  put(x - 1, y - 1, '_', C.white); put(x, y - 1, 'A', C.white); put(x + 1, y - 1, '_', C.white);
+  put(x + 2, y - 1, dish, s.lEarth ? C.earth : C.earthDim);
+  put(x - 2, y, '#', s.lSun ? C.amber : '#6a5a40'); put(x - 1, y, '[', C.white); put(x, y, 'H', C.white); put(x + 1, y, ']', C.white); put(x + 2, y, 'T', s.lEarth ? C.earth : C.earthDim);
+}
+function composePanel(y0) {
+  const s = state.sky, orbit = state.phase === 'orbit';
+  box(102, y0, 40, 11, C.uiDim, 'EARTH', C.earth);
+  earthDisc(FX * 103 + 16, FY * (y0 + 1) + 18, 15.5, s.sun, s.earth, s.earthVis, s.t + state.anim * 0.3);
+  const ex = 121, a = y0 + 1;
+  str(ex, a, `EL ${sgn(s.earth.el, 1)}°`, C.earth); str(ex, a + 1, `AZ ${Math.round(s.earth.az)}°`, C.earth);
+  str(ex, a + 2, `PHASE ${Math.round(s.phase.frac * 100)}%`, C.white);
+  str(ex, a + 4, s.earthVis ? 'IN VIEW' : s.earth.el > 0 ? 'HIDDEN BY' : 'BELOW', s.earthVis ? C.ui : C.red);
+  if (!s.earthVis) str(ex, a + 5, s.earth.el > 0 ? 'THE RIDGE' : 'HORIZON', C.red);
+  str(ex, a + 7, `SUN ${sgn(s.sun.el)}°`, C.amber); str(ex, a + 8, `AZ ${Math.round(s.sun.az)}°`, C.amber);
+  const b = y0 + 11;
+  if (orbit) {
+    box(102, b, 40, 10, C.uiDim, 'FLAGS · COMPARE SITES', C.ui);
+    const D = mission().duration;
+    str(104, b + 1, `NEXT ${D}h FROM T+${state.landOff}h  SUN EARTH`, C.uiDim);
+    const row = (r, label, st, col) => {
+      str(104, r, label, col); str(109, r, String(st.sun).padStart(3) + '%', C.amber); str(114, r, String(st.earth).padStart(3) + '%', C.earth);
+      st.tl.forEach((v, i) => put(120 + i, r, v === 3 ? '█' : v === 1 ? '▀' : v === 2 ? '▄' : '·', v === 3 ? C.ui : v === 1 ? C.amber : v === 2 ? C.earth : C.uiDark));
+    };
+    row(b + 2, 'HERE', statsFor(state.cursor.c, state.cursor.r), C.white);
+    for (let i = 0; i < 3; i++) {
+      const f = state.flags[i];
+      if (f) row(b + 3 + i, `[${i + 1}]`, statsFor(f.c, f.r), C.ui); else str(104, b + 3 + i, `[${i + 1}] F plants a flag here`, C.uiDark);
+    }
+    str(104, b + 7, '█ sun+earth ▀ sun ▄ earth · dark', C.uiDim);
+    str(104, b + 8, `slip-proof? scrub [ ] to test`, C.uiDark);
+  } else {
+    box(102, b, 40, 10, C.uiDim, 'STATUS', C.ui);
+    str(104, b + 1, 'BATTERY ' + gauge(state.battery, 18) + ' ' + String(Math.round(state.battery)).padStart(3) + '%', battColor(state.battery));
+    str(104, b + 2, `SUIT DATA  ${String(Math.round(state.data)).padStart(4)} pts`, state.data > 0 ? C.amber : C.uiDim);
+    if (state.data > 0) str(124, b + 2, '(UNSENT)', C.red);
+    str(104, b + 3, `SENT HOME  ${String(Math.round(state.sent)).padStart(4)} pts`, C.earth);
+    const st = stationAt(state.player.c, state.player.r);
+    const atTxt = st ? st.name + (st.id ? ` · ${usesLeft(st.id)} left` : '') : 'open regolith';
+    str(104, b + 4, 'AT ' + atTxt, st ? C.white : C.uiDim);
+    str(104, b + 5, s.cold ? 'IN SHADOW · cold drain' : 'IN SUNLIGHT', s.cold ? '#7fa8d8' : C.amber);
+    str(104, b + 6, `CALIBRATED ${state.calibrated ? 'YES' : 'no'}`, state.calibrated ? C.ui : C.uiDim);
+    str(104, b + 7, 'LANDER  ARRAY ', C.uiDim); str(118, b + 7, s.lSun ? 'LIT' : 'DARK', s.lSun ? C.amber : C.red);
+    str(123, b + 7, 'DISH ', C.uiDim); str(128, b + 7, s.lEarth ? 'LINK' : 'NO LINK', s.lEarth ? C.earth : C.red);
+    const toDep = state.depart - state.t;
+    str(104, b + 8, `DEPART IN ${toDep.toFixed(1)}h`, toDep < 6 ? C.red : C.ui);
+    if (s.lEarth && s.lEarthNext !== null) str(122, b + 8, `EARTHSET ${fmtH(s.lEarthNext)}`, C.earth);
+  }
+  const rr = y0 + 21, rh = 42 - rr;
+  box(102, rr, 40, rh, C.uiDim, 'RADIO', C.ui);
+  const lines = [];
+  for (const m of state.msgs) { const shown = m.text.slice(0, Math.floor(m.shown)); wrap(shown, 37).forEach(l => lines.push([l, m.color])); }
+  lines.slice(-(rh - 2)).forEach(([l, col], i) => str(104, rr + 1 + i, l, col));
+}
+function composeBar() {
+  const s = state.sky, orbit = state.phase === 'orbit';
+  box(0, 42, COLS, 3, C.uiDim);
+  let x = 2;
+  const seg = (t, col) => { str(x, 43, t, col); x += t.length; };
+  const sep = () => seg(' │ ', C.uiDark);
+  if (orbit) { seg(`LANDING T+${state.landOff}h`, C.ui); sep(); }
+  seg(`SUN ${sgn(s.sun.el)}° `, C.amber);
+  seg(s.sunVis ? `CLEARS SKYLINE ${sgn(s.sun.el - s.hzSun)}°` : (s.sun.el > 0 ? `HIDDEN BY RIDGE ${sgn(s.sun.el - s.hzSun)}°` : 'BELOW HORIZON'), s.sunVis ? C.sun : C.red);
+  sep(); seg(s.sunVis ? `SUNSET IN ${fmtH(s.sunNext)}` : `SUNRISE IN ${fmtH(s.sunNext)}`, s.sunVis && s.sunNext !== null && s.sunNext < 6 ? C.red : C.amber);
+  sep(); seg(`EARTH ${sgn(s.earth.el, 1)}° `, C.earth); seg(s.earthVis ? 'IN VIEW' : 'HIDDEN', s.earthVis ? C.earth : C.red);
+  sep(); seg(s.earthVis ? `EARTHSET IN ${fmtH(s.earthNext)}` : `EARTHRISE IN ${fmtH(s.earthNext)}`, C.earth);
+  if (!orbit) {
+    sep();
+    const st = stationAt(state.player.c, state.player.r);
+    const hint = !st ? (state.view === 'pov' ? `[W] WALK ${DIRN[dir8(state.hd)]} · [A/D] LOOK` : 'walk onto a station') : st.kind === 'survey' ? (s.sunVis ? '[E] SURVEY' : 'SURVEY NEEDS SUN') : st.kind === 'dish' ? (s.lEarth ? '[E] TRANSMIT' : 'NO EARTH, NO LINK') : st.kind === 'hab' ? '[E] CALIBRATE' : st.kind === 'array' ? '[E] LOW-POWER WAIT' : `[E] DRILL ${state.battery >= tune.drill_reserve ? '' : '(LOW BATT)'}`;
+    seg(hint, C.white);
+  }
+  bottomText(0, 44, COLS, orbit ? (state.view === 'pov' ? 'ARROWS move scout · Q/E look · V map · F flag · [ ] hour · ENTER land · ESC pause · M mute' : 'ARROWS move scout · F flag · [ ] landing hour · 1-3 jump · V ground view · ENTER land · ESC · M')
+    : (state.view === 'pov' ? 'W/S walk 0.5h · A/D look · E work · Z wait 1h · V map · ESC pause · M mute' : 'ARROWS step 0.5h · E work · Z wait 1h · V visor · ESC pause · M mute'), C.uiDim);
+}
+function composeDialog() {
+  const d = state.dialog, w = 80, lines = wrap(d.text, w - 6), h = lines.length + 6, c0 = 11, r0 = 18;
+  fillRect(c0, r0, w, h, ' ', '#000');
+  box(c0, r0, w, h, C.ui, d.title, C.amber);
+  let left = Math.floor(d.shown);
+  lines.forEach((l, i) => { const n = Math.max(0, Math.min(l.length, left)); str(c0 + 3, r0 + 2 + i, l.slice(0, n), C.ui); left -= l.length + 1; });
+  if (d.shown >= d.text.length) str(c0 + w - 22, r0 + h - 2, Math.floor(state.anim * 2) % 2 ? '[ENTER] CONTINUE' : '[ENTER] CONTINUE_', C.amber);
+}
+function overlayBox(title, lines, foot, col = C.ui) {
+  const w = 70, h = lines.length + 6, c0 = Math.floor((COLS - w) / 2), r0 = 16;
+  fillRect(c0, r0, w, h, ' ', '#000'); box(c0, r0, w, h, col, title, C.amber);
+  lines.forEach(([t, c], i) => strC(r0 + 2 + i, t, c || C.ui, c0, w));
+  strC(r0 + h - 2, foot, C.amber, c0, w);
+}
+
+// ---- Title logo, drawn in characters ----------------------------------------------------
+const GLYPH = {
+  A: [' ### ', '#   #', '#####', '#   #', '#   #'], C: [' ####', '#    ', '#    ', '#    ', ' ####'],
+  E: ['#####', '#    ', '#### ', '#    ', '#####'], I: ['###', ' # ', ' # ', ' # ', '###'],
+  N: ['#   #', '##  #', '# # #', '#  ##', '#   #'], O: [' ### ', '#   #', '#   #', '#   #', ' ### '],
+  P: ['#### ', '#   #', '#### ', '#    ', '#    '], R: ['#### ', '#   #', '#### ', '#  # ', '#   #'],
+  S: [' ####', '#    ', ' ### ', '    #', '#### '], T: ['#####', '  #  ', '  #  ', '  #  ', '  #  '],
+  X: ['#   #', ' # # ', '  #  ', ' # # ', '#   #'],
+};
+function logoWord(word, r0, reveal) {
+  const widths = [...word].map(ch => GLYPH[ch][0].length + 1), total = widths.reduce((a, b) => a + b, 0) * 2 - 2;
+  let x = Math.floor((COLS - total) / 2);
+  const shades = ['#ffe2a8', '#ffc76a', '#ffb347', '#e8902c', '#b86a1c'];
+  for (const ch of word) {
+    const g = GLYPH[ch];
+    for (let r = 0; r < 5; r++) for (let c = 0; c < g[r].length; c++) {
+      if (g[r][c] !== '#' || x + c * 2 > reveal) continue;
+      put(x + c * 2 + 1, r0 + r + 1, '░', '#4a2e10'); put(x + c * 2 + 2, r0 + r + 1, '░', '#4a2e10');
+      put(x + c * 2, r0 + r, '█', shades[r]); put(x + c * 2 + 1, r0 + r, '█', shades[r]);
+    }
+    x += g[0].length * 2 + 2;
+  }
+}
+const titleProf = () => profile(78, 8);
+
+// ---- Scenes ---------------------------------------------------------------------------
+function tickAnims(dt) {
+  state.anim += dt;
+  for (const q of state.particles) { q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.92; q.vy *= 0.92; q.life -= dt; }
+  state.particles = state.particles.filter(q => q.life > 0);
+  for (const q of state.vfx) { q.u += q.vu * dt; q.v += q.vv * dt; q.vv += 0.9 * dt; q.life -= dt; }
+  state.vfx = state.vfx.filter(q => q.life > 0 && q.v < 1.02);
+  for (const p of state.pulses) p.t += dt;
+  state.pulses = state.pulses.filter(p => p.t < 1.1);
+  for (const m of state.msgs) if (m.shown < m.text.length) { m.shown += 70 * dt; if (Math.floor(m.shown) % 3 === 0) sfx.click(); }
+  if (state.dialog && state.dialog.shown < state.dialog.text.length) { state.dialog.shown += 75 * dt; sfx.click(); }
+}
+function playMood() {
+  const s = state.sky;
+  if (!s) return { warm: 1, home: 1 };
+  const sunNear = s.sunVis && s.sunNext !== null && s.sunNext < 6;
+  const earthNear = state.phase === 'surface' && s.lEarth && s.lEarthNext !== null && s.lEarthNext < 6 && state.data > 0;
+  const depNear = state.phase === 'surface' && state.depart - state.t < 6;
+  return { warm: s.sunVis, cold: !s.sunVis, home: state.phase === 'surface' ? s.lEarth : s.earthVis, tension: sunNear || earthNear || depNear || state.battery < 20, breath: state.phase === 'surface' };
+}
+const scenes = {
+  figures: {
+    update(dt) { state.anim += dt; },
+    draw() {
+      clearGrid(); fx.sun = null; fx.earth = null;
+      box(0, 0, COLS, ROWS, C.uiDim, 'FIGURES · EVERY UNIT AND STATION', C.ui);
+      const item = (c, r, name) => str(c - Math.floor(name.length / 2), r, name, C.uiDim);
+      put(6, 6, '@', '#ffffff'); item(6, 9, 'ASTRONAUT');
+      const L = { c: 26, r: 6 };
+      put(L.c - 3, L.r - 1, '/', C.amber); put(L.c - 2, L.r - 1, '/', C.amber); put(L.c - 1, L.r - 1, '_', C.white); put(L.c, L.r - 1, 'A', C.white); put(L.c + 1, L.r - 1, '_', C.white); put(L.c + 2, L.r - 1, '>', C.earth);
+      put(L.c - 2, L.r, '#', C.amber); str(L.c - 1, L.r, '[H]', C.white); put(L.c + 2, L.r, 'T', C.earth); item(26, 9, 'LANDER: ARRAY·HAB·DISH');
+      str(44, 6, '[S]', C.amber); item(45, 9, 'SURVEY OUTCROP');
+      str(60, 6, '[D]', C.white); item(61, 9, 'DRILL SITE');
+      str(76, 6, '[D]', '#6fb6ff'); item(77, 9, 'TERRACE DRILL (PSR)');
+      put(92, 5, '▲', C.ui); put(92, 6, '1', C.ui); item(92, 9, 'FLAG');
+      put(103, 5, '┌', C.ui); put(107, 5, '┐', C.ui); put(105, 6, '+', C.ui); put(103, 7, '┘', C.ui); put(103, 7, '└', C.ui); put(107, 7, '┘', C.ui); item(105, 9, 'SCOUT');
+      str(117, 6, '-=*=-', C.sun); item(119, 9, 'SUN');
+      str(129, 5, '.-.', C.earth); str(129, 6, '(D)', C.white); str(129, 7, "'-'", C.earth); item(130, 9, 'EARTH');
+      earthDisc(FX * 18, FY * 19, 15.5, { az: 120, el: 1 }, { az: 250, el: 3 }, true, 3); item(18, 25, 'EARTH DISC, PHASED');
+      const info = composeSky(titleProf(), sunAt(14, 0), earthAt(14, 0), 28, false); item(70, 39, 'SKYLINE STRIP: RIDGES, SUN, EARTH');
+      void info;
+      present();
+    },
+  },
+  title: {
+    update(dt) {
+      state.anim += dt;
+      if (Math.floor(state.anim * 60) % 4 === 0 && state.anim < 1.6) sfx.click();
+      if (pressed('Enter') || pressed('Space')) { reset(); scene = 'play'; sfx.static(0.5); }
+      musicUpdate({ warm: 1, home: 1 });
+    },
+    draw() {
+      clearGrid(); fx.sun = null; fx.earth = null;
+      const reveal = state.anim * 110;
+      logoWord('CRATER', 2, reveal); logoWord('EXPECTATIONS', 9, reveal - 60);
+      if (state.anim > 1.2) strC(16, 'A LUNAR SOUTH-POLE MISSION SIM  ·  NASA SPACE APPS 2026 · LUNAR LANDING SITE NAVIGATOR', C.uiDim);
+      box(0, 18, COLS, 13, C.uiDark, 'THE SKY FROM CONNECTING RIDGE', C.uiDim);
+      const info = composeSky(titleProf(), sunAt(14, 0), earthAt(14, 0), 19);
+      composeSkyLabels(29, info);
+      box(8, 32, 126, 7, C.uiDim, 'CONTROLS', C.ui);
+      CONTROLS.forEach((c, i) => str(11, 34 + i, c, C.ui));
+      if (Math.floor(state.anim * 2) % 2) strC(40, '>>  PRESS ENTER TO LAUNCH  <<', C.amber);
+      strC(43, 'Sun & Earth tracks and terrain are illustrative: a playable model of the problem, not a flight prediction.', C.uiDark);
+      present();
+    },
+  },
+  play: {
+    update(dt) {
+      tickAnims(dt);
+      musicUpdate(playMood());
+      if (pressed('Escape') || pressed('KeyP')) { scene = 'pause'; return; }
+      if (state.dialog) {
+        if (pressed('Enter') || pressed('Space') || pressed('KeyE')) {
+          if (state.dialog.shown < state.dialog.text.length) state.dialog.shown = state.dialog.text.length;
+          else { state.dialog = null; sfx.beep(880); }
+        }
+        return;
+      }
+      if (pressed('KeyV')) { state.view = state.view === 'pov' ? 'map' : 'pov'; sfx.servo(); }
+      const pov = state.view === 'pov';
+      if (state.phase === 'surface' && pov) { // the visor: look with A/D, walk the way you face with W/S
+        const tl = repeatKey('tl', ['ArrowLeft', 'KeyA'], dt, tune.turn_repeat), tr = repeatKey('tr', ['ArrowRight', 'KeyD'], dt, tune.turn_repeat);
+        if (tl || tr) { state.hd = (state.hd + (tr ? 1 : -1) * tune.turn_step + 360) % 360; sfx.click(); }
+        const fw = repeatKey('fw', ['ArrowUp', 'KeyW'], dt, tune.hold_repeat), bk = repeatKey('bk', ['ArrowDown', 'KeyS'], dt, tune.hold_repeat);
+        if (fw || bk) { const [dc, dr] = DIR8[dir8(state.hd)]; tryStep(fw ? dc : -dc, fw ? dr : -dr); }
+        else if (pressed('KeyE') || pressed('Space') || pressed('Enter')) act();
+        else if (pressed('KeyZ')) { sfx.servo(); advance(tune.wait_hours, 'wait'); }
+        return;
+      }
+      if (state.phase === 'orbit' && pov) {
+        const tl = repeatKey('tl', ['KeyQ', 'Comma'], dt, tune.turn_repeat), tr = repeatKey('tr', ['KeyE', 'Period'], dt, tune.turn_repeat);
+        if (tl || tr) { state.hd = (state.hd + (tr ? 1 : -1) * tune.turn_step + 360) % 360; sfx.click(); }
+      }
+      const mv = moveInput(dt);
+      if (state.phase === 'orbit') {
+        if (mv) {
+          state.cursor.c = Math.max(0, Math.min(MC - 1, state.cursor.c + mv[0]));
+          state.cursor.r = Math.max(0, Math.min(MR - 1, state.cursor.r + mv[1]));
+          updateSky(); sfx.telemetry();
+        }
+        if (pressed('KeyF')) {
+          if (state.flags.length >= 3) state.flags.shift();
+          state.flags.push({ c: state.cursor.c, r: state.cursor.r }); sfx.beep(1046);
+          const st = statsFor(state.cursor.c, state.cursor.r);
+          radio(`FLAG ${state.flags.length}: Sun ${st.sun}% · Earth ${st.earth}% over the mission.`, C.ui);
+        }
+        ['Digit1', 'Digit2', 'Digit3'].forEach((k, i) => { if (pressed(k) && state.flags[i]) { state.cursor = { ...state.flags[i] }; updateSky(); sfx.beep(); } });
+        const lo = state.landMin, hi = state.landMin + tune.land_window;
+        if (pressed('BracketRight') && state.landOff < hi) { state.landOff = Math.min(hi, state.landOff + tune.scrub_step); updateSky(); sfx.servo(); }
+        if (pressed('BracketLeft') && state.landOff > lo) { state.landOff = Math.max(lo, state.landOff - tune.scrub_step); updateSky(); sfx.servo(); }
+        if (pressed('Enter') || pressed('Space')) land();
+      } else {
+        if (mv) tryStep(mv[0], mv[1]);
+        else if (pressed('KeyE') || pressed('Space') || pressed('Enter')) act();
+        else if (pressed('KeyZ')) { sfx.servo(); advance(tune.wait_hours, 'wait'); }
+      }
+    },
+    draw() { composePlay(); present(); },
+  },
+  pause: {
+    update() { if (pressed('Escape') || pressed('KeyP')) scene = 'play'; musicUpdate({}); },
+    draw() { composePlay(); overlayBox('PAUSED', [['The Moon keeps turning. You do not.'], ['']], '[ESC] RESUME'); present(); },
+  },
+  over: {
+    update(dt) {
+      tickAnims(dt); musicUpdate({ cold: 1 });
+      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; scene = 'play'; }
+      else if (pressed('Enter')) nextMission();
+    },
+    draw() {
+      composePlay();
+      const sc = state.scores[state.mi] || { sent: 0, lost: 0 };
+      overlayBox('BATTERY DEPLETED · MISSION ENDED EARLY', [
+        ['The suit went dark before departure.', C.red], [''],
+        [`SCIENCE THAT REACHED EARTH   ${sc.sent}`, C.earth], [`LOST ON THE SUIT             ${sc.lost}`, C.red], [''],
+        ['Rest at the array and stay in the light: the ridge decides when you charge.', C.uiDim],
+      ], '[R] RETRY MISSION     [ENTER] NEXT MISSION', C.red);
+      present();
+    },
+  },
+  results: {
+    update(dt) {
+      tickAnims(dt); musicUpdate({ home: 1, warm: 1 });
+      if (pressed('Enter')) nextMission();
+      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; scene = 'play'; }
+    },
+    draw() {
+      composePlay();
+      const sc = state.scores[state.mi] || { sent: 0, lost: 0 };
+      const last = state.mi === MISSIONS.length - 1;
+      const lines = [[`DEPARTURE · MISSION ${state.mi + 1}: ${mission().name}`, C.amber], [''],
+        [`SCIENCE THAT REACHED EARTH   ${sc.sent}`, C.earth], [`LEFT UNSENT ON THE SUIT      ${sc.lost}`, sc.lost ? C.red : C.uiDim], ['']];
+      if (last) {
+        state.scores.forEach((s, i) => lines.push([`MISSION ${i + 1}   ${String(s ? s.sent : 0).padStart(4)}`, C.ui]));
+        lines.push([`TOTAL SCIENCE HOME   ${state.score}`, C.amber]);
+        const grade = state.score >= 420 ? 'FLIGHT DIRECTOR' : state.score >= 260 ? 'MISSION PLANNER' : state.score >= 120 ? 'HORIZON READER' : 'CADET';
+        lines.push(['']); lines.push([`RATING: ${grade}`, C.sun]);
+      } else lines.push(['Next: a new sky, a harder trade.', C.uiDim]);
+      overlayBox(last ? 'CAMPAIGN COMPLETE' : 'MISSION COMPLETE', lines, last ? '[ENTER] BACK TO TITLE   [R] RETRY' : '[ENTER] NEXT MISSION   [R] RETRY');
+      present();
+    },
+  },
+};
+function nextMission() {
+  if (state.mi < MISSIONS.length - 1) { startMission(state.mi + 1); scene = 'play'; }
+  else { scene = 'title'; state.anim = 0; }
+}
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear();
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

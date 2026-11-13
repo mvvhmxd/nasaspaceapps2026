@@ -1,0 +1,30 @@
+L1	pass	evidence/surface.png	character grid, density ramp, hillshade and cast shadows, black PSR with blue frost, palette, CRT glow, boxed HUD, block-letter title (evidence/title.png), lander dish and panels drawn
+L2	pass	evidence/surface.png	Shackleton (never sunlit), Connecting Ridge and The Terrace labelled on a hand-shaped site
+L3	pass	evidence/surface.png	2D top-down map with the 360° skyline strip above it
+F1	pass	evidence/orbit.png	scout reticle, live skyline from the scout, flags with sun/earth % and timelines (index.html composePanel), [ ] scrub, ENTER lands (evidence/surface.png)
+F2	pass	evidence/surface.png	Sun and Earth tracks occluded by the ray-marched horizon; bar shows sun elevation, clearance, sunset/sunrise and Earthset times
+F3	pass	index.html:579	turn-based steps and work cost hours; hab, array, survey, drill, PSR drill, dish; drain in shadow; surface.png shows it running
+F4	pass	config.js:83	three missions with briefings; Mission 3 slip in land(); radio panel in surface.png
+F5	pass	evidence/surface.png	hillshade, shadows, frost, phased Earth disc, glare (orbit.png), footprints, lander; dust and transmit pulse in code (land, composePlay)
+F6	not_assessed	index.html:musicUpdate	synth sound and generative music are built (warm, cold, home, tension layers; mute on M) but cannot be heard by the check
+S1	pass	evidence/orbit.png	orbit scouting, flags and landing-hour scrub
+S2	pass	evidence/surface.png	skyline occlusion: sun(hidden) behind ridge, Earth in view
+S3	pass	evidence/surface.png	battery gauge, charge from lit array, cold drain in shadow
+S4	pass	index.html:579	survey needs sun, drill needs reserve and pays more in PSR, transmit needs Earth
+S5	pass	index.html:456	three missions; Mission 3 slip sends you back to orbit
+S6	not_assessed	index.html:audioInit	built with Web Audio; sound cannot be checked by a screenshot
+M1	pass	evidence/title.png	logo reveals left to right with typewriter clicks
+M2	pass	evidence/orbit.png	Mission 1 opens in orbit with the Sun just above a ridge (findStart) and a briefing to move the scout and watch the sky
+M3	pass	config.js:83	briefing tells the player to watch the SKY strip
+M4	pass	evidence/orbit.png	moving the scout changes the skyline (orbit.png vs surface.png: sun clear vs hidden)
+M5	pass	index.html:973	F plants a flag, ENTER lands
+M6	pass	evidence/surface.png	lander drawn after touchdown; dust and thump in land()
+M7	pass	index.html:579	E at [S] adds science while the Sun is visible; bar hint shows [E] SURVEY
+M8	pass	index.html:829	sunset time turns red under 6h, music switches to cold layer and tension
+M9	pass	evidence/surface.png	the ridge hides the Sun while it is still up (+1.64° but hidden)
+C1	not_assessed	config.js:1	Mission 1 sunset time depends on the site picked; not timed by the check
+C2	pass	index.html:558	unsent suit data is reported as lost at departure; Mission 2 Earth libration sinks Earth
+C3	pass	config.js:1	psr_drill_mult 2.5, cold drain, 12h slip in Mission 3
+C4	pass	index.html:530	battery at 0 ends the mission early, keeping only what was sent
+C5	pass	index.html:530	mission ends at departure time
+C6	not_assessed	-	a provenance note, not a game line

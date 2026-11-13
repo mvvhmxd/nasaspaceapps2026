@@ -1,0 +1,1 @@
+Nearest game: FTL: Faster Than Light (tense resource timing between nodes); this one differs in that the obstacle is a real-geometry skyline that hides the Sun and Earth, with turn-based walking on a ray-marched lunar heightfield and an orbital scouting phase to choose where and when you land.
