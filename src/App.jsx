@@ -16,6 +16,7 @@ export default function App() {
   const [speed, setSpeed] = useState(1);
   const [fps, setFps] = useState(0);
   const [renderBlocked, setRenderBlocked] = useState(null);
+  const [ascii, setAsciiState] = useState({ on: true, reason: 'user' });
 
   useEffect(() => {
     loadSite('demo').then(setSite, (e) => setError(String(e)));
@@ -23,7 +24,13 @@ export default function App() {
 
   useEffect(() => {
     if (!site) return;
-    const s = createSurfaceScene(canvasRef.current, site, { onFps: setFps });
+    const params = new URLSearchParams(location.search);
+    const s = createSurfaceScene(canvasRef.current, site, {
+      onFps: setFps,
+      onAsciiChange: setAsciiState,
+      cellCss: Number(params.get('cell')) || 10, // ?cell=8 for denser glyphs, 12 for bigger type
+    });
+    if (params.get('ascii') === '0') s.setAscii(false);
     sceneRef.current = s;
     return () => s.dispose();
   }, [site]);
@@ -70,6 +77,12 @@ export default function App() {
           </div>
           <div className="hud top-right">
             <div>{fps} fps</div>
+            <div>
+              <button className={ascii.on ? 'on' : ''} onClick={() => sceneRef.current?.setAscii(!ascii.on)}>
+                ASCII {ascii.on ? 'on' : 'off'} (A)
+              </button>
+              {ascii.reason === 'auto' && !ascii.on && <div className="dark">switched off: low fps</div>}
+            </div>
             <div>
               render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees ✓</span> : <span className="dark">differs ✗</span>}

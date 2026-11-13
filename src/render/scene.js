@@ -1,20 +1,27 @@
-// Surface view (M1): lit terrain, a low Sun casting real shadows, and the lander.
-// Plain shading only; the ASCII pass arrives in M3.
+// Surface view: lit terrain, a low Sun casting real shadows, the lander, and
+// the coloured ASCII pass (toggle with `A`; falls back to plain shading below 30 fps).
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTerrain, landerEye, blockedToward } from './terrain.js';
 import { directionFromAzEl } from './sun.js';
 import { createTopDownCamera, fitTopDown } from './camera.js';
+import { createAsciiPass } from './ascii.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
+const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
+const FPS_FLOOR = 30; // three readings below this switch the ASCII pass off
 
-export function createSurfaceScene(canvas, site, { onFps } = {}) {
+export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss = 10 } = {}) {
   const hm = site.heightmap;
   const extentM = (hm.size - 1) * hm.spacingM;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const pixelRatio = Math.min(window.devicePixelRatio, 2);
+  renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setClearColor(PALETTE.navy);
@@ -22,9 +29,9 @@ export function createSurfaceScene(canvas, site, { onFps } = {}) {
   const scene = new THREE.Scene();
 
   // Faint fill so shadowed ground is dark navy, not pure black (earthshine-ish).
-  scene.add(new THREE.HemisphereLight(0x3a4a7a, PALETTE.navy, 0.35));
+  scene.add(new THREE.HemisphereLight(0x4a5c96, PALETTE.navy, 0.5));
 
-  const sun = new THREE.DirectionalLight(0xfff1d6, 3.2);
+  const sun = new THREE.DirectionalLight(0xffe2b0, 3.4);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   const sc = sun.shadow.camera;
@@ -54,14 +61,37 @@ export function createSurfaceScene(canvas, site, { onFps } = {}) {
   ring.position.y = 5;
   lander.add(body, ring);
   lander.position.set(0, eye.y, 0);
+  lander.traverse((o) => o.layers.set(SHARP_LAYER));
   scene.add(lander);
 
   const camera = createTopDownCamera(extentM * 0.95, 1);
+  camera.layers.enableAll();
   const controls = new MapControls(camera, canvas);
   controls.enableRotate = false;
   controls.screenSpacePanning = true;
   controls.minZoom = 0.7;
   controls.maxZoom = 12;
+
+  // ASCII chain: scene -> glyph pass -> output (tone mapping + sRGB once).
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const ascii = createAsciiPass({ cellCss, pixelRatio });
+  composer.addPass(ascii.pass);
+  composer.addPass(new OutputPass());
+
+  let asciiOn = true;
+  let autoOff = false;
+  let lowFpsStreak = 0;
+  function setAscii(on, reason = 'user') {
+    if (asciiOn === on) return;
+    asciiOn = on;
+    autoOff = !on && reason === 'auto';
+    onAsciiChange?.({ on, reason, ramp: ascii.ramp });
+  }
+  function onKey(e) {
+    if (e.key === 'a' || e.key === 'A') setAscii(!asciiOn);
+  }
+  window.addEventListener('keydown', onKey);
 
   const sunDir = new THREE.Vector3();
 
@@ -83,33 +113,63 @@ export function createSurfaceScene(canvas, site, { onFps } = {}) {
     const h = canvas.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
+    composer.setSize(w, h);
+    ascii.setSize(w * pixelRatio, h * pixelRatio);
     fitTopDown(camera, w / h);
   }
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
   resize();
 
+  function draw() {
+    if (asciiOn) {
+      camera.layers.set(0); // terrain only through the glyph pass
+      composer.render();
+      camera.layers.set(SHARP_LAYER); // lander drawn crisp on top
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+      renderer.autoClear = true;
+      camera.layers.enableAll();
+    } else {
+      renderer.render(scene, camera);
+    }
+  }
+
   let frames = 0;
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     controls.update();
-    renderer.render(scene, camera);
+    draw();
     frames++;
     const now = performance.now();
     if (now - last >= 500) {
-      onFps?.(Math.round((frames * 1000) / (now - last)));
+      const fps = Math.round((frames * 1000) / (now - last));
+      onFps?.(fps);
       frames = 0;
       last = now;
+      if (asciiOn && !document.hidden) {
+        lowFpsStreak = fps < FPS_FLOOR ? lowFpsStreak + 1 : 0;
+        if (lowFpsStreak >= 3) setAscii(false, 'auto');
+      }
     }
   });
 
   return {
     setSun,
     setLanderInShadow,
+    setAscii: (on) => setAscii(on),
+    setCell: (css) => ascii.setCell(css, pixelRatio),
+    get asciiOn() { return asciiOn; },
+    get autoOff() { return autoOff; },
+    ramp: ascii.ramp,
     dispose() {
       renderer.setAnimationLoop(null);
+      window.removeEventListener('keydown', onKey);
       ro.disconnect();
       controls.dispose();
+      ascii.dispose();
+      composer.dispose?.();
       terrain.traverse((o) => o.geometry?.dispose());
       renderer.dispose();
     },

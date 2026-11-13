@@ -27,7 +27,7 @@ body {
   border-radius: 6px;
 }
 .top-left { top: 12px; left: 12px; max-width: calc(100% - 24px); }
-.top-right { top: 12px; right: 12px; text-align: right; }
+.top-right { top: 12px; right: 12px; text-align: right; display: grid; gap: 6px; justify-items: end; }
 .bottom {
   left: 12px; right: 12px; bottom: 12px;
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
