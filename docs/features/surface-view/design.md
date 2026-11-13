@@ -10,7 +10,7 @@ The main screen. The real terrain around the landing site, built from LOLA, is l
 3. The lander turns red when the sim says it is in shadow. The sim (horizon mask) is the source of truth, not the render; if the two disagree, that is a bug to log.
 4. **Top-down camera** (default): orthographic, looking straight down, north up, with a compass ring at the screen edge marking the directions of the Sun (amber) and Earth (teal).
 5. **Hero camera** (`V` toggles): perspective, low behind the lander, facing the Sun's azimuth; drag to orbit. The horizon, the Sun and Earth are visible directly.
-6. **ASCII pass:** the screen is split into cells. Each cell's brightness picks a glyph from the ramp `' .:-=+*#%@'` and is tinted by the scene colour. HUD and UI text are drawn on top in normal type and are never ASCII-filtered.
+6. **ASCII pass:** the screen is split into cells. Each cell's brightness picks one of 32 glyphs ordered by measured ink density and is tinted by the scene colour blended with a navy-to-amber grade. The lander is drawn sharp on top. HUD and UI text are DOM and are never ASCII-filtered. `A` toggles the pass.
 7. Colour holds the state: sunlit terrain in amber–grey, shadow in navy, Earth and comms in teal, the lander red when in shadow. Every state also has an icon or label on the HUD (accessibility).
 8. Camera switches use a short eased transition (about 0.4 s), never a cut, so the player keeps track of where the lander is.
 
@@ -19,7 +19,7 @@ The main screen. The real terrain around the landing site, built from LOLA, is l
 |---|---|---|---|
 | Terrain crop | 10 × 10 [ASSUMPTION] | km | Includes the ridges that cast the shadows? |
 | Mesh resolution | 256 × 256 [ASSUMPTION] | vertices | Detail vs frame rate |
-| ASCII cell size | 8 [ASSUMPTION] | px | Detailed but readable |
+| ASCII cell size | 10 (8 and 12 compared on screenshots) | CSS px | 8 reads as halftone, 12 as big type; check on the demo laptop |
 | Target frame rate | 60 | fps | On the slowest team laptop |
 | Camera transition | 0.4 | s | — |
 
@@ -35,3 +35,4 @@ The main screen. The real terrain around the landing site, built from LOLA, is l
 ## History
 - 2026-11-13: designed.
 - 2026-11-13: M1 scene proof built (terrain, Sun shadows, lander shadow state, top-down camera); see implementation.md for what is still missing.
+- 2026-11-13: ASCII pass built; ramp changed from 10 fixed glyphs to 32 measured ones, cell size 8 → 10 px after comparing screenshots.

@@ -1,6 +1,6 @@
 # Crater Expectations — Game Design Document
 
-**Version:** 0.2 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log) · [Architecture](ARCHITECTURE.md)
+**Version:** 0.3 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log) · [Architecture](ARCHITECTURE.md)
 
 ## Summary
 You are the mission planner for a small lander going to the Moon's south pole. You choose where and when to land, plan the work around when the Sun and Earth are up, then watch the mission play out on real terrain while the battery drains in every shadow. A launch delay can change the sky and force you to replan. A mission ends when you survive the full window (stars for science collected compared with the best possible plan) or when the battery hits zero.
@@ -50,7 +50,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 
 ## Milestones
 1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge. *Built on the illustrative demo site 2026-11-13; the real-data half waits for the pipeline.*
-1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps.
+1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps. *Built 2026-11-13; the 60 fps half still needs a real-GPU reading.*
 2. **M2, the loop in grey:** site planner + survival sim + launch slip + debrief, 1 mission, 3 sites · done when: a teammate plays start to restart without help.
 3. **M3, identity:** ASCII shader, colours, both cameras, missions 1 and 2 · done when: the M2 run looks like the target style at 60 fps on a team laptop.
 4. **M4, ship:** Horizons check shown in the debrief, deployed public link, demo script · done when: the link works in a private window on another machine.
@@ -83,3 +83,4 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 ## Change log
 **0.1 (2026-11-13):** first draft from the planning chat; site planner, survival sim and surface view designed; D-001 to D-003 logged.
 **0.2 (2026-11-13):** M1 scene proof built ([surface view](features/surface-view/implementation.md)); [Architecture](ARCHITECTURE.md) added with the site data format; M1b added and D-004 logged.
+**0.3 (2026-11-13):** M1b ASCII pass built ([surface view](features/surface-view/design.md), ramp and cell size changed).
