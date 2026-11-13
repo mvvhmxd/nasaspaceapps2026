@@ -10,6 +10,7 @@ import { buildTerrain, landerEye, blockedToward } from './terrain.js';
 import { directionFromAzEl } from './sun.js';
 import { createTopDownCamera, fitTopDown, gridOffsetPx } from './camera.js';
 import { createAsciiPass } from './ascii.js';
+import { createSkyMarkers } from './markers.js';
 import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
 import { PALETTE } from '../theme.js';
 
@@ -70,7 +71,9 @@ export function createSurfaceScene(
     new THREE.MeshBasicMaterial({ color: PALETTE.amber, transparent: true, opacity: 0.9 }),
   );
   ring.position.y = 5;
-  lander.add(body, ring);
+  const skyMarkers = createSkyMarkers();
+  skyMarkers.group.position.y = 5;
+  lander.add(body, ring, skyMarkers.group);
   lander.position.set(0, eye.y, 0);
   lander.traverse((o) => o.layers.set(SHARP_LAYER));
   scene.add(lander);
@@ -141,6 +144,11 @@ export function createSurfaceScene(
     ring.material.color.set(inShadow ? PALETTE.red : PALETTE.amber);
   }
 
+  /** Sun / Earth pointers for one hour. Pass the sim's stateAt() result. */
+  function setSky(sky) {
+    skyMarkers.set(sky);
+  }
+
   function resize() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -194,6 +202,7 @@ export function createSurfaceScene(
   return {
     setSun,
     setLanderInShadow,
+    setSky,
     setAscii: (on) => setAscii(on),
     setQuality: (name) => setQuality(name),
     setCell: (css) => ascii.setCell(css, pixelRatio),
@@ -207,6 +216,7 @@ export function createSurfaceScene(
       ro.disconnect();
       controls.dispose();
       ascii.dispose();
+      skyMarkers.dispose();
       composer.dispose?.();
       terrain.traverse((o) => o.geometry?.dispose());
       renderer.dispose();

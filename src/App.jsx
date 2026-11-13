@@ -4,6 +4,7 @@ import { stateAt } from './sim/visibility.js';
 import { createSurfaceScene } from './render/scene.js';
 import { initialQuality, saveQuality } from './render/quality.js';
 import AsciiQuality from './ui/AsciiQuality.jsx';
+import MapLegend from './ui/MapLegend.jsx';
 
 function safeStorage() {
   try { return window.localStorage; } catch { return undefined; }
@@ -54,6 +55,7 @@ export default function App() {
     const { renderBlocked: rb } = sceneRef.current.setSun(state.sunAz, state.sunEl);
     setRenderBlocked(rb);
     sceneRef.current.setLanderInShadow(!state.sunlit); // the sim decides
+    sceneRef.current.setSky(state); // Sun / Earth pointers
   }, [site, state?.hour]);
 
   useEffect(() => {
@@ -95,6 +97,7 @@ export default function App() {
               {agree === null ? '…' : agree ? <span className="lit">agrees ✓</span> : <span className="dark">differs ✗</span>}
             </div>
           </div>
+          <MapLegend />
           <div className="hud bottom">
             <button onClick={() => setPlaying((p) => !p)}>{playing ? 'Pause' : 'Play'}</button>
             {SPEEDS.map((s) => (

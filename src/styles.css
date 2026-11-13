@@ -60,3 +60,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-of
 @media (max-width: 600px) {
   .top-right { top: auto; bottom: 64px; }
 }
+
+.map-legend { left: 12px; bottom: 76px; display: grid; gap: 2px; font-size: 12px; }
+.compass { display: flex; align-items: center; gap: 6px; color: #fff; }
+@media (max-width: 600px) { .map-legend { display: none; } }
