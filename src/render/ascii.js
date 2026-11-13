@@ -324,7 +324,6 @@ export function createAsciiRenderer(
   let atlas = null;
 
   const api = {
-    ramp: '',
     get cellPx() {
       return material.uniforms.cell.value;
     },
@@ -338,7 +337,6 @@ export function createAsciiRenderer(
       material.uniforms.cell.value = cellPx;
       material.uniforms.minorHalfWidth.value = Math.max(1, cellPx * MINOR_STROKE_PER_CELL) / 2;
       material.uniforms.majorHalfWidth.value = Math.max(1.6, cellPx * MAJOR_STROKE_PER_CELL) / 2;
-      api.ramp = atlas.ramp;
     },
     render(scene, camera, bufW, bufH, gridOffset, layer = 0) {
       const cellPx = material.uniforms.cell.value;

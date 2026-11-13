@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { decodeSite } from '../../src/data/loadSite.js';
 import { stateAt } from '../../src/sim/visibility.js';
-import { skyAt, shortestArc, createDisplayClock } from '../../src/render/skyClock.js';
+import { skyAt, shortestArc, createDisplayClock, displaySample } from '../../src/render/skyClock.js';
 
 const site = decodeSite(JSON.parse(fs.readFileSync('public/sites/demo.json', 'utf8')));
 const last = site.series.sunAz.length - 1;
@@ -109,5 +109,36 @@ describe('display clock', () => {
     c.setTarget(6, 0);
     expect(c.value(0)).toBe(6);
     expect(c.animating(0)).toBe(false);
+  });
+});
+
+describe('displaySample (what App draws each frame)', () => {
+  const KEYS = ['sunAz', 'sunEl', 'earthAz', 'earthEl', 'sunMask', 'earthMask', 'sunlit', 'earthVisible', 'hour'];
+  it('lands exactly on the sim state once each hourly ease settles, through a playback run', () => {
+    const clock = createDisplayClock({ durationMs: 450 });
+    let now = 0;
+    clock.jump(100, now);
+    for (let h = 101; h <= 160; h++) { // 1x playback: one hour per 500 ms tick
+      now += 500;
+      clock.setTarget(h, now);
+      const mid = displaySample(site, clock, now + 200);
+      expect(mid.sunEl).toBeGreaterThanOrEqual(Math.min(stateAt(site, h - 1).sunEl, stateAt(site, h).sunEl) - 1e-9);
+      expect(mid.sunEl).toBeLessThanOrEqual(Math.max(stateAt(site, h - 1).sunEl, stateAt(site, h).sunEl) + 1e-9);
+      const settled = displaySample(site, clock, now + 450);
+      const truth = stateAt(site, h);
+      for (const k of KEYS) expect(settled[k]).toEqual(truth[k]);
+    }
+  });
+
+  it('16x playback (16 h per tick) also settles exactly on the target hour', () => {
+    const clock = createDisplayClock({ durationMs: 450 });
+    let now = 0;
+    clock.jump(0, now);
+    for (let h = 16; h <= 400; h += 16) {
+      now += 500;
+      clock.setTarget(h, now);
+      const settled = displaySample(site, clock, now + 450);
+      for (const k of KEYS) expect(settled[k]).toEqual(stateAt(site, h)[k]);
+    }
   });
 });

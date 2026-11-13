@@ -7,7 +7,7 @@ import AsciiQuality from './ui/AsciiQuality.jsx';
 import MapLegend from './ui/MapLegend.jsx';
 import HorizonStrip from './ui/HorizonStrip.jsx';
 import SignalFence from './ui/SignalFence.jsx';
-import { skyAt, createDisplayClock } from './render/skyClock.js';
+import { displaySample, createDisplayClock } from './render/skyClock.js';
 
 function safeStorage() {
   try { return window.localStorage; } catch { return undefined; }
@@ -71,17 +71,17 @@ export default function App() {
       const clock = clockRef.current;
       if (clock.animating(now)) {
         easing = true;
-        const sample = skyAt(site, clock.value(now));
+        const sample = displaySample(site, clock, now);
         s.setSkySmooth(sample);
         stripRef.current?.setSky({ ...sample, ...truthRef.current });
       } else if (easing) {
         easing = false; // settled: land exactly on the sim's whole-hour state
-        const exact = skyAt(site, clock.value(now));
+        const exact = displaySample(site, clock, now);
         s.setSkySmooth(exact, { final: true });
         stripRef.current?.setSky({ ...exact, ...truthRef.current });
       }
     });
-    return () => { off(); s.dispose(); setScene(null); };
+    return () => { off(); s.dispose(); sceneRef.current = null; setScene(null); };
   }, [site]);
 
   const state = useMemo(() => (site ? stateAt(site, hour) : null), [site, hour]);
@@ -165,7 +165,7 @@ export default function App() {
               {agree === null ? '…' : agree ? <span className="lit">agrees ✓</span> : <span className="dark">differs ✗</span>}
             </div>
           </div>
-          <HorizonStrip ref={stripRef} site={site} sky={state} />
+          <HorizonStrip ref={stripRef} site={site} sky={state} playing={playing} />
           <MapLegend site={site} />
           <div className="hud bottom">
             <button onClick={() => setPlaying((p) => !p)}>{playing ? 'Pause' : 'Play'}</button>

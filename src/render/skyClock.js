@@ -87,3 +87,9 @@ export function createDisplayClock({ durationMs = 500, maxEaseHours = 48, reduce
   };
   return clock;
 }
+
+/** The sky to draw this frame: the display clock's hour, sampled from the site.
+ * Once the clock has settled this is exactly stateAt(site, hour). */
+export function displaySample(site, clock, now) {
+  return skyAt(site, clock.value(now));
+}

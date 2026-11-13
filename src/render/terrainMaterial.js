@@ -90,5 +90,7 @@ void main() {`,
   return {
     material,
     setAscii(on) { uniforms.uAscii.value = on ? 1 : 0; },
+    /** Keep plain-mode lines LINE_WIDTH_CSS wide when the renderer's pixel ratio changes. */
+    setPixelRatio(ratio) { uniforms.uLineHalfPx.value = (LINE_WIDTH_CSS / 2) * ratio; },
   };
 }

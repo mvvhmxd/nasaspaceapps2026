@@ -14,15 +14,20 @@ import { createTerrainMaterial } from './terrainMaterial.js';
 import { siteContours } from './contours.js';
 import { motionShadowSize } from './shadowLod.js';
 import { createFence } from './fence.js';
+import { createRefreshEstimator, createShadowStride } from './frameBudget.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
 const FPS_FLOOR = 30; // 2 s below this (after a grace period) steps quality down, not past Performance
+// Plain shading (ASCII Off) lights every pixel; at DPR 2 that is 4x the fragments of
+// DPR 1 and fell to ~39 fps. Capping its pixel ratio at 1.5 keeps it smooth and still
+// sharp (lines stay ~1.25 CSS px). ASCII keeps the full ratio: its glyphs need it.
+const OFF_MAX_PIXEL_RATIO = 1.5;
 
 /**
  * `quality`: preset name (see quality.js). `cellCss`: optional debug override of the
- * preset's cell size (`?cell=8`). `onAsciiChange({ on, reason, quality, ramp })` fires
+ * preset's cell size (`?cell=8`). `onAsciiChange({ on, reason, quality })` fires
  * on every quality change; reason is 'user' or 'auto' (low fps).
  * `onFenceChange({ state, secondsLeft })` fires when the signal fence (fence.js)
  * changes state or its countdown ticks a second; never per frame.
@@ -38,8 +43,9 @@ export function createSurfaceScene(
   const extentM = (hm.size - 1) * hm.spacingM;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  const pixelRatio = Math.min(window.devicePixelRatio, 2);
-  renderer.setPixelRatio(pixelRatio);
+  const pixelRatio = Math.min(window.devicePixelRatio, 2); // ASCII presets
+  const ratioFor = (p) => (p.ascii ? pixelRatio : Math.min(window.devicePixelRatio, OFF_MAX_PIXEL_RATIO));
+  renderer.setPixelRatio(ratioFor(preset()));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap; // three.js removed PCFSoftShadowMap and fell back to this anyway
   // The terrain is static, so the shadow map only changes when the Sun moves or
@@ -67,7 +73,7 @@ export function createSurfaceScene(
 
   // Contours from the real heightmap: levels every `interval` m (index line every 5th).
   const { minM, maxM, interval } = siteContours(hm); // cached: the map key reads the same
-  const terrainMat = createTerrainMaterial({ minM, maxM, interval, pixelRatio });
+  const terrainMat = createTerrainMaterial({ minM, maxM, interval, pixelRatio: renderer.getPixelRatio() });
   const terrain = buildTerrain(hm, { material: terrainMat.material });
   scene.add(terrain);
 
@@ -128,7 +134,6 @@ export function createSurfaceScene(
   });
 
   let lastAsciiQuality = preset().ascii ? quality : DEFAULT_QUALITY; // where `A` returns to
-  let lastReason = 'user';
   const governor = createFpsGovernor({ floor: FPS_FLOOR });
   governor.reset(performance.now()); // ignore the start-up hitch
 
@@ -143,7 +148,6 @@ export function createSurfaceScene(
   function setQuality(name, reason = 'user') {
     if (!isQuality(name) || name === quality) return;
     quality = name;
-    lastReason = reason;
     governor.reset(performance.now()); // ignore the hitch from rebuilding atlas / shadow map
     const p = preset();
     if (p.ascii) {
@@ -151,7 +155,13 @@ export function createSurfaceScene(
       ascii.setCell(cellCss || p.cellCss, pixelRatio, p.glyphs);
     }
     applyShadowMap(p.shadowMap);
-    onAsciiChange?.({ on: p.ascii, reason, quality, ramp: ascii.ramp });
+    const ratio = ratioFor(p);
+    if (renderer.getPixelRatio() !== ratio) {
+      renderer.setPixelRatio(ratio);
+      terrainMat.setPixelRatio(ratio); // plain-mode line width stays in CSS px
+      resize();
+    }
+    onAsciiChange?.({ on: p.ascii, reason, quality });
   }
 
   function setAscii(on, reason = 'user') {
@@ -181,12 +191,6 @@ export function createSurfaceScene(
     return { renderBlocked: blockedToward(terrain, eye, directionFromAzEl(az, el, checkDir)) };
   }
 
-  /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
-  function setSun(az, el) {
-    pointLight(az, el);
-    return checkSun(az, el);
-  }
-
   // Truth flags from the sim's whole hour (setSky); smooth frames move only positions.
   let skyFlags = { sunlit: true, earthVisible: true };
   // Motion level of detail. Redrawing a 4096² shadow map every frame does not fit
@@ -198,29 +202,28 @@ export function createSurfaceScene(
   // when the zoom crosses a power of two), so nothing is reallocated per hour.
   const MOTION_LINGER_MS = 1500;
   const shadowCoverM = sc.right - sc.left;
+  // Plain shading (Off) has no glyph cell to hide detail in, so while moving it
+  // uses a shadow texel of at most OFF_MOTION_TEXEL_PX drawing-buffer pixels
+  // (1024² at default zoom, back to the full map when zoomed in). Measured at DPR 2,
+  // 16x play: p95 36 ms with a fixed 2048² vs 33 ms at 1024²; the still view always
+  // returns to the full map MOTION_LINGER_MS after the Sun stops.
+  const OFF_MOTION_TEXEL_PX = 4;
   function motionSize() {
     const mPerPx = (camera.top - camera.bottom) / (camera.zoom * Math.max(1, buffer.y));
-    return motionShadowSize({
-      coverM: shadowCoverM,
-      cellM: preset().ascii ? ascii.cellPx * mPerPx : null,
-      stillSize: stillShadowMap(),
-    });
+    const cellPx = preset().ascii ? ascii.cellPx : 2 * OFF_MOTION_TEXEL_PX; // texel <= cell / 2
+    return motionShadowSize({ coverM: shadowCoverM, cellM: cellPx * mPerPx, stillSize: stillShadowMap() });
   }
   let motionUntil = -Infinity;
   const stillShadowMap = () => preset().shadowMap;
-  // Safety net on slow GPUs: redraw the shadows every `shadowStride` smooth frames;
-  // the stride adapts to the frame time (1 = every frame, up to 4). Between redraws
-  // three.js keeps the shadow matrix of the last redraw, so lighting and shadows
-  // stay consistent, just updated at 60 / 30 / 20 / 15 Hz.
-  const MAX_SHADOW_STRIDE = 4;
-  let shadowStride = 1;
+  // Safety net on slow GPUs: redraw the shadows every `stride` smooth frames. The
+  // stride follows the frame time measured against the display's own refresh
+  // interval (frameBudget.js: 60, 50 or 144 Hz alike). Between redraws three.js
+  // keeps the shadow matrix of the last redraw, so lighting and shadows stay
+  // consistent, just updated at 1/1, 1/2, 1/3 or 1/4 of the frame rate.
+  const refresh = createRefreshEstimator();
+  const shadowStride = createShadowStride();
   let sinceShadow = 0;
-  let frameMsAvg = 16.7; // smoothed frame time, updated by the animation loop
-  let fastFrames = 0;
-  function adaptShadowStride() {
-    if (frameMsAvg > 18.5 && shadowStride < MAX_SHADOW_STRIDE) { shadowStride++; fastFrames = 0; }
-    else if (frameMsAvg < 17.5 && shadowStride > 1 && ++fastFrames > 120) { shadowStride--; fastFrames = 0; }
-  }
+  let frameMsAvg = refresh.intervalMs; // smoothed frame time, updated by the animation loop
   /** One display frame between hourly samples (render/skyClock.skyAt): moves the
    * light, the shadows and the pointer azimuths. No raycast; the solid / hollow
    * state and the lander colour stay with the sim's whole hour. Pass
@@ -232,8 +235,8 @@ export function createSurfaceScene(
       motionUntil = performance.now() + MOTION_LINGER_MS;
       applyShadowMap(motionSize());
     }
-    adaptShadowStride();
-    const redraw = final || ++sinceShadow >= shadowStride;
+    const stride = shadowStride.update(frameMsAvg, refresh.intervalMs);
+    const redraw = final || ++sinceShadow >= stride;
     if (redraw) sinceShadow = 0;
     pointLight(sample.sunAz, sample.sunEl, redraw);
     skyMarkers.set({ ...skyFlags, sunAz: sample.sunAz, earthAz: sample.earthAz });
@@ -297,6 +300,7 @@ export function createSurfaceScene(
   let prevFrame = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    refresh.sample(now - prevFrame);
     frameMsAvg += (Math.min(now - prevFrame, 100) - frameMsAvg) * 0.1;
     prevFrame = now;
     if (now > motionUntil) applyShadowMap(stillShadowMap()); // still again: full-size shadows (no-op when already)
@@ -318,7 +322,6 @@ export function createSurfaceScene(
   });
 
   return {
-    setSun,
     checkSun,
     setSkySmooth,
     setLanderInShadow,
@@ -329,10 +332,6 @@ export function createSurfaceScene(
     setReducedMotion: (on) => { fence.reducedMotion = !!on; },
     get fenceState() { return fenceShown; },
     get quality() { return quality; },
-    get shadowStride() { return shadowStride; },
-    get asciiOn() { return preset().ascii; },
-    get autoOff() { return quality === 'off' && lastReason === 'auto'; },
-    get ramp() { return ascii.ramp; },
     dispose() {
       renderer.setAnimationLoop(null);
       frameSubs.clear();

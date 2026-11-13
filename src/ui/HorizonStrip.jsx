@@ -3,11 +3,13 @@
 // rule the sim uses: a body is visible only when it is above the ridge at its
 // azimuth. Solid marker = above the ridge, hollow = hidden (same as the map).
 //
-// Props carry the once-per-hour sim state (text, screen-reader line). For smooth
-// motion the parent calls ref.setSky(sample) every frame with an interpolated
-// sample (render/skyClock.skyAt); that updates SVG attributes directly, with no
-// React re-render per frame.
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+// Props carry the once-per-hour sim state: the gap label and the screen-reader
+// line come from it, so they always agree with the solid / hollow markers (which
+// show the same hour's truth flags). For smooth motion the parent calls
+// ref.setSky(sample) every frame with an interpolated sample (render/skyClock);
+// that updates SVG positions directly, with no React re-render per frame.
+// Labels keep a constant on-screen size at any strip width (--hs-k, see below).
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   azToX, elToY, elevationScale, pinState, skylinePaths, exaggeration, compassTicks, gapLabel,
 } from './horizonGeometry.js';
@@ -27,8 +29,12 @@ function srLine(sky) {
   const earth = `Earth ${fmt(sky.earthEl)} at azimuth ${Math.round(sky.earthAz)}°, ridge ${fmt(sky.earthMask)}: ${sky.earthVisible ? 'visible' : 'hidden'}.`;
   return `${sun} ${earth}`;
 }
+/** During playback: only what changed matters (sunrise, sunset, Earth rise / set). */
+function srFlags(sunlit, earthVisible) {
+  return `Sun ${sunlit ? 'above' : 'behind'} the ridge. Earth ${earthVisible ? 'in view' : 'hidden'}.`;
+}
 
-const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
+const HorizonStrip = forwardRef(function HorizonStrip({ site, sky, playing = false }, ref) {
   const scale = useMemo(() => elevationScale(site.horizonMask, site.series), [site]);
   const paths = useMemo(() => skylinePaths(site.horizonMask, W, H, scale), [site, scale]);
   const ticks = useMemo(() => compassTicks(W), []);
@@ -37,21 +43,29 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
   const sunRef = useRef(null);
   const earthRef = useRef(null);
   const gapRef = useRef(null);
-  const gapTextRef = useRef(null);
+  const sectionRef = useRef(null);
+  const svgRef = useRef(null);
+  // viewBox units per CSS px: SVG text and markers are drawn at size * k so they keep
+  // the same on-screen size however narrow the strip gets (otherwise labels shrank
+  // to ~5.5 px at 900 px wide).
+  const kRef = useRef(1);
+  const lastSample = useRef(null);
 
   const apply = useCallback((s) => {
+    lastSample.current = s;
     if (!s || !sunRef.current) return;
     const sx = azToX(s.sunAz, W);
     const sy = elToY(s.sunEl, scale, H);
     const ex = azToX(s.earthAz, W);
     const ey = elToY(s.earthEl, scale, H);
     const ry = elToY(s.sunMask, scale, H);
+    const k = kRef.current.toFixed(3);
     const sun = sunRef.current;
-    sun.setAttribute('transform', `translate(${sx.toFixed(2)} ${sy.toFixed(2)})`);
+    sun.setAttribute('transform', `translate(${sx.toFixed(2)} ${sy.toFixed(2)}) scale(${k})`);
     sun.dataset.state = s.sunlit ? 'up' : 'hidden';
     sun.dataset.pinned = pinState(s.sunEl, scale);
     const earth = earthRef.current;
-    earth.setAttribute('transform', `translate(${ex.toFixed(2)} ${ey.toFixed(2)})`);
+    earth.setAttribute('transform', `translate(${ex.toFixed(2)} ${ey.toFixed(2)}) scale(${k})`);
     earth.dataset.state = s.earthVisible ? 'up' : 'hidden';
     earth.dataset.pinned = pinState(s.earthEl, scale);
     const gap = gapRef.current;
@@ -59,8 +73,23 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
     gap.setAttribute('x2', sx.toFixed(2));
     gap.setAttribute('y1', sy.toFixed(2));
     gap.setAttribute('y2', ry.toFixed(2));
-    gapTextRef.current.textContent = gapLabel('Sun', s.sunEl, s.sunMask);
   }, [scale]);
+
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === 'undefined') return undefined;
+    const update = () => {
+      const w = svg.getBoundingClientRect().width;
+      if (!w) return;
+      kRef.current = W / w;
+      sectionRef.current?.style.setProperty('--hs-k', kRef.current.toFixed(3));
+      if (lastSample.current) apply(lastSample.current); // re-scale the markers
+    };
+    const ro = new ResizeObserver(update);
+    ro.observe(svg);
+    update();
+    return () => ro.disconnect();
+  }, [apply]);
 
   useImperativeHandle(ref, () => ({ setSky: apply }), [apply]);
   // Initial position only (and after a site change). From then on the parent
@@ -70,17 +99,29 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
   skyRef.current = sky;
   useEffect(() => { apply(skyRef.current); }, [apply]);
 
+  // Screen-reader line, announced politely. Paused: the full line each hour.
+  // Playing: only when a truth flag flips (at 16x the full line would be read
+  // ten times in five seconds).
+  const flagsKey = sky ? `${sky.sunlit}|${sky.earthVisible}` : '';
+  const srText = useMemo(
+    () => (!sky ? '' : playing ? srFlags(sky.sunlit, sky.earthVisible) : srLine(sky)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playing, playing ? flagsKey : sky],
+  );
+
   return (
-    <section className="hud horizon-strip" aria-label="Horizon seen from the lander">
+    <section className="hud horizon-strip" aria-label="Horizon seen from the lander" ref={sectionRef}>
       <header className="hs-head">
         <span className="hs-title">
           Horizon from the lander
           <span className="hs-note"><span className="hs-sep" aria-hidden="true"> · </span>hourly data, motion smoothed</span>
         </span>
-        <span className="hs-gap" aria-hidden="true" ref={gapTextRef} />
+        {/* The hour's own values, like the markers' solid / hollow state. */}
+        <span className="hs-gap" aria-hidden="true">{sky ? gapLabel('Sun', sky.sunEl, sky.sunMask) : ''}</span>
       </header>
       <svg
         className="hs-svg"
+        ref={svgRef}
         viewBox={`0 0 ${W} ${PAD_TOP + H + AXIS_H}`}
         role="img"
         aria-label={`360 degree skyline from the site's horizon mask, north in the middle, heights exaggerated ${vx} times. Sun and Earth markers are solid when above the ridge and hollow when hidden.`}
@@ -118,7 +159,7 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
           <text className="hs-vx" x={W / 2 + 14} textAnchor="start">heights ×{vx}</text>
         </g>
       </svg>
-      {sky && <div className="sr-only" aria-live="polite">{srLine(sky)}</div>}
+      {sky && <div className="sr-only" aria-live="polite">{srText}</div>}
     </section>
   );
 });

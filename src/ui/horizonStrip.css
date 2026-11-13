@@ -15,13 +15,15 @@
 
 .hs-grid line { stroke: rgba(201, 206, 214, 0.12); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .hs-grid.hs-zero line { stroke: rgba(201, 206, 214, 0.32); stroke-dasharray: 3 3; }
-.hs-grid text { fill: rgba(201, 206, 214, 0.6); font-size: 9px; }
+/* SVG text sizes are multiplied by --hs-k (viewBox units per CSS px, set by the
+   component) so they stay the same on-screen size at any strip width. */
+.hs-grid text { fill: rgba(201, 206, 214, 0.6); font-size: calc(9px * var(--hs-k, 1)); }
 .hs-tick-minor { stroke: rgba(201, 206, 214, 0.35); vector-effect: non-scaling-stroke; }
 .hs-ground { fill: rgba(70, 80, 108, 0.55); }
 .hs-skyline { fill: none; stroke: #c9ced6; stroke-width: 1.4; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .hs-north { stroke: rgba(201, 206, 214, 0.25); stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
-.hs-axis text { fill: rgba(201, 206, 214, 0.8); font-size: 10px; }
-.hs-axis .hs-vx { fill: rgba(201, 206, 214, 0.55); font-size: 9px; }
+.hs-axis text { fill: rgba(201, 206, 214, 0.8); font-size: calc(10px * var(--hs-k, 1)); }
+.hs-axis .hs-vx { fill: rgba(201, 206, 214, 0.55); font-size: calc(9px * var(--hs-k, 1)); }
 
 .hs-gapline { stroke: rgba(245, 165, 36, 0.75); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
 
