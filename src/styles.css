@@ -39,6 +39,7 @@ body {
   display: inline-block; margin: 2px 0 4px; padding: 0 6px;
   border: 1px solid var(--amber); color: var(--amber); border-radius: 3px; font-size: 12px;
 }
+.badge.real { border-color: var(--teal); color: var(--teal); }
 .lit { color: var(--amber); }
 .comms { color: var(--teal); }
 .dark { color: var(--red); }

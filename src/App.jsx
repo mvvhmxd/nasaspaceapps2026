@@ -4,6 +4,7 @@ import { stateAt } from './sim/visibility.js';
 import { createSurfaceScene } from './render/scene.js';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
+const DEFAULT_SITE = 'connecting-ridge';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -19,7 +20,9 @@ export default function App() {
   const [ascii, setAsciiState] = useState({ on: true, reason: 'user' });
 
   useEffect(() => {
-    loadSite('demo').then(setSite, (e) => setError(String(e)));
+    // ?site=<id> picks a file in public/sites/; the real site is the default.
+    const id = new URLSearchParams(location.search).get('site') || DEFAULT_SITE;
+    loadSite(id).then(setSite, (e) => setError(String(e)));
   }, []);
 
   useEffect(() => {
@@ -39,7 +42,9 @@ export default function App() {
 
   useEffect(() => {
     if (!state || !sceneRef.current) return;
-    const { renderBlocked: rb } = sceneRef.current.setSun(state.sunAz, state.sunEl);
+    const { renderBlocked: rb } = sceneRef.current.setSun(state.sunAz, state.sunEl, {
+      farBlocked: state.sunBehindFarTerrain,
+    });
     setRenderBlocked(rb);
     sceneRef.current.setLanderInShadow(!state.sunlit); // the sim decides
   }, [site, state?.hour]);
@@ -54,7 +59,10 @@ export default function App() {
 
   if (error) return <div className="msg">Could not load site: {error}</div>;
 
-  const agree = state && renderBlocked !== null ? renderBlocked === !state.sunlit : null;
+  // The crop can only cast shadows from terrain inside it, so the render is
+  // checked against the near horizon; far-terrain shadows are labelled instead.
+  const agree =
+    state && renderBlocked !== null ? renderBlocked === state.sunEl <= state.sunNearMask : null;
 
   return (
     <div className="app">
@@ -63,13 +71,17 @@ export default function App() {
         <>
           <div className="hud top-left">
             <div className="title">{site.name}</div>
-            {site.illustrative && <div className="badge">Illustrative</div>}
+            {site.illustrative ? (
+              <div className="badge">Illustrative</div>
+            ) : (
+              <div className="badge real" title={site.source}>Real data: LOLA terrain · JPL Horizons sky</div>
+            )}
             <div>{state.timeUtc.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>
             <div>
-              Sun az {state.sunAz.toFixed(1)}° el {state.sunEl.toFixed(2)}° · ridge {state.sunMask.toFixed(2)}°
+              Sun az {state.sunAz.toFixed(1)}° el {state.sunEl.toFixed(2)}° · horizon {state.sunMask.toFixed(2)}°
             </div>
             <div className={state.sunlit ? 'lit' : 'dark'}>
-              {state.sunlit ? '☀ SUNLIT' : '● IN SHADOW'}
+              {state.sunlit ? '☀ SUNLIT' : state.sunBehindFarTerrain ? '● IN SHADOW (far terrain)' : '● IN SHADOW'}
             </div>
             <div className={state.earthVisible ? 'comms' : 'dark'}>
               {state.earthVisible ? '◆ EARTH IN VIEW' : '◇ NO EARTH CONTACT'} (el {state.earthEl.toFixed(1)}°)

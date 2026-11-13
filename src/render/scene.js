@@ -14,6 +14,7 @@ import { PALETTE } from '../theme.js';
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
 const FPS_FLOOR = 30; // three readings below this switch the ASCII pass off
+const SUN_INTENSITY = 3.4;
 
 export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss = 10 } = {}) {
   const hm = site.heightmap;
@@ -31,7 +32,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   // Faint fill so shadowed ground is dark navy, not pure black (earthshine-ish).
   scene.add(new THREE.HemisphereLight(0x4a5c96, PALETTE.navy, 0.5));
 
-  const sun = new THREE.DirectionalLight(0xffe2b0, 3.4);
+  const sun = new THREE.DirectionalLight(0xffe2b0, SUN_INTENSITY);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   const sc = sun.shadow.camera;
@@ -95,11 +96,16 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
 
   const sunDir = new THREE.Vector3();
 
-  /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
-  function setSun(az, el) {
+  /**
+   * Point the Sun for one hour; returns whether the terrain blocks it (render check).
+   * farBlocked: the sim says terrain beyond the crop hides the Sun. That shadow
+   * cannot be cast by the crop, so the Sun light is switched off to match.
+   */
+  function setSun(az, el, { farBlocked = false } = {}) {
     directionFromAzEl(az, el, sunDir);
     sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
     sun.target.position.set(0, 0, 0);
+    sun.intensity = farBlocked ? 0 : SUN_INTENSITY;
     return { renderBlocked: blockedToward(terrain, eye, sunDir) };
   }
 

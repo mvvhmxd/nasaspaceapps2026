@@ -1,4 +1,5 @@
 // Load and decode a site file (format: docs/ARCHITECTURE.md, "Site data").
+import { computeMask } from '../sim/horizon.js';
 
 /** Decode a base64 Uint16 (little-endian) heightmap into metres. */
 export function decodeHeightmap(hmJson) {
@@ -23,7 +24,11 @@ export function decodeSite(json) {
     if (json.series[key].length !== n) throw new Error(`series.${key} length differs from sunAz`);
   }
   if (json.horizonMask.length !== 360) throw new Error('horizonMask must have 360 values');
-  return { ...json, heightmap: decodeHeightmap(json.heightmap), hours: n };
+  const heightmap = decodeHeightmap(json.heightmap);
+  // nearMask: the part of the horizon inside the terrain crop, i.e. what the 3D
+  // view can show. horizonMask (the sim's truth) can be higher where terrain
+  // beyond the crop sets the horizon.
+  return { ...json, heightmap, nearMask: computeMask(heightmap), hours: n };
 }
 
 export async function loadSite(id) {
