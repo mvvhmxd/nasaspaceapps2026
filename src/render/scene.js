@@ -73,7 +73,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   scene.add(flood);
   // Earthshine (surface view only): a faint light from Earth's real direction, so ground in the
   // Sun's shadow still shows its relief when Earth is up. It casts no shadows.
-  const earthLight = new THREE.DirectionalLight(0xdfe8ff, 0);
+  const earthLight = new THREE.DirectionalLight(0x58c8ff, 0); // cyan-blue earthshine
   scene.add(earthLight, earthLight.target);
   let earthEl = -90;
 
@@ -250,10 +250,10 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
       return;
     }
     const lit = !siteDark && sunEl > 0;
-    sun.color.set(0xffffff);
+    sun.color.set(0xffb648); // amber: sunlit ground
     sun.intensity = lit ? 1 / (LAMBERT * EXPOSURE * Math.sin((Math.max(sunEl, 0.4) * Math.PI) / 180)) : 0;
-    fill.color.set(0xffffff);
-    fill.intensity = lit ? 0.035 : 0.12;
+    fill.color.set(0x4f74ff); // blue: ground in shadow
+    fill.intensity = lit ? 0.06 : 0.14;
     flood.intensity = 70;
     earthLight.intensity = earthEl > 0 ? 0.05 / (LAMBERT * Math.sin((Math.max(earthEl, 1) * Math.PI) / 180)) : 0;
   }

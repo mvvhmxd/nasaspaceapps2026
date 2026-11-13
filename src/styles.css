@@ -179,3 +179,9 @@ fieldset.field { border: 0; padding: 0; }
 
 /* H key in a mission: hide the panels to see the view */
 .nohud .stack-left, .nohud .hud.top-right, .nohud .hud.feed { display: none; }
+
+.legend-row { display: inline-flex; gap: 12px; align-items: center; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: baseline; }
+.sw-sun { background: #ffb648; }
+.sw-shade { background: #4f8fff; }
+.sw-lamp { background: #fff; }

@@ -128,7 +128,9 @@ const AsciiShader = {
 
       if (dots > 0.5) {
         // Halftone: one round dot per cell, radius grows with brightness, keeps the scene's own colour.
-        // White dots on black, sized by brightness; strongly coloured things (Earth) keep their colour.
+        // Dots sized by brightness. Each dot takes the colour of the light that reaches it, so the
+        // ground reads as game state: amber = sunlight (charging), blue = shadow (draining),
+        // white = the rover's floodlight. Coloured things (Earth) keep their own colour.
         float dl = smoothstep(0.03, 0.85, y);
         float radius = 0.52 * sqrt(dl);
         float edge = 1.0 / cell;
@@ -136,7 +138,9 @@ const AsciiShader = {
         float maxc = max(scene.r, max(scene.g, scene.b));
         float minc = min(scene.r, min(scene.g, scene.b));
         float chroma = (maxc - minc) / max(maxc, 0.001);
-        vec3 dotColor = mix(vec3(0.93), scene / max(maxc, 0.001), smoothstep(0.15, 0.45, chroma)) * mix(0.6, 1.0, dl);
+        vec3 hue = scene / max(maxc, 0.001);
+        hue = mix(vec3(dot(hue, LUMA)), hue, 1.0 + 0.6 * (1.0 - chroma)); // push faint tints further apart
+        vec3 dotColor = clamp(hue, 0.0, 1.0) * mix(0.62, 1.0, dl);
         gl_FragColor = vec4(mix(emptyColor, dotColor, dotInk), 1.0);
         return;
       }
@@ -169,7 +173,7 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
     },
     setDots(on) {
       pass.uniforms.dots.value = on ? 1 : 0;
-      pass.uniforms.emptyColor.value.set(on ? '#05070b' : PALETTE.navy); // near-black sky behind the dots
+      pass.uniforms.emptyColor.value.set(on ? '#060a1c' : PALETTE.navy); // deep navy behind the dots
     },
     setCell(css, dpr) {
       const cellPx = Math.max(4, Math.round(css * dpr));

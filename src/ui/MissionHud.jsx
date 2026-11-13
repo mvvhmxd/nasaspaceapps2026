@@ -109,6 +109,13 @@ export default function MissionHud({ sim, events, playing, speed, speeds, forceS
           {view === 'surface' ? 'Map view' : 'Surface view'} (V)
         </button>
         <span className="dim small">H hides panels</span>
+        {view === 'surface' && (
+          <span className="legend-row small" aria-label="Ground colours">
+            <span><i className="sw sw-sun" /> sunlight: charges</span>
+            <span><i className="sw sw-shade" /> shadow: drains</span>
+            <span><i className="sw sw-lamp" /> rover light</span>
+          </span>
+        )}
         <div className="progress" aria-hidden="true"><span style={{ width: `${(100 * elapsed) / cfg.missionHours}%` }} /></div>
         <button onClick={onAbort}>Abort to planner</button>
       </div>
