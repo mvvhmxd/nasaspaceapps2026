@@ -6,6 +6,7 @@ import { initialQuality, saveQuality } from './render/quality.js';
 import AsciiQuality from './ui/AsciiQuality.jsx';
 import MapLegend from './ui/MapLegend.jsx';
 import HorizonStrip from './ui/HorizonStrip.jsx';
+import SignalFence from './ui/SignalFence.jsx';
 import { skyAt, createDisplayClock } from './render/skyClock.js';
 
 function safeStorage() {
@@ -35,6 +36,7 @@ export default function App() {
   const [hour, setHour] = useState(() => Number(new URLSearchParams(location.search).get('h')) || 0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [fence, setFence] = useState({ state: 'inside', secondsLeft: 0 }); // signal fence (render/fence.js)
   const [ascii, setAsciiState] = useState(() => {
     const quality = initialQuality(location.search, safeStorage());
     return { on: quality !== 'off', reason: 'user', quality };
@@ -54,6 +56,8 @@ export default function App() {
         setAsciiState(a);
         if (a.reason === 'user') saveQuality(a.quality, safeStorage()); // low-fps steps aren't saved
       },
+      onFenceChange: setFence, // fires on state / whole-second changes only
+      reducedMotion: !!reducedMotionQuery()?.matches,
       quality: ascii.quality, // ?quality=high|balanced|performance|off, ?ascii=0, or the saved choice
       cellCss: Number(params.get('cell')) || undefined, // ?cell=8 overrides the preset's cell size
     });
@@ -111,7 +115,10 @@ export default function App() {
   useEffect(() => {
     const mq = reducedMotionQuery();
     if (!mq) return;
-    const onChange = () => { clockRef.current.reducedMotion = mq.matches; };
+    const onChange = () => {
+      clockRef.current.reducedMotion = mq.matches;
+      sceneRef.current?.setReducedMotion(mq.matches);
+    };
     mq.addEventListener?.('change', onChange);
     return () => mq.removeEventListener?.('change', onChange);
   }, []);
@@ -135,6 +142,7 @@ export default function App() {
       <canvas ref={canvasRef} className="view" />
       {site && state && (
         <>
+          <SignalFence fence={fence} />
           <div className="hud top-left">
             <div className="title">{site.name}</div>
             {site.illustrative && <div className="badge">Illustrative</div>}

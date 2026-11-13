@@ -13,6 +13,7 @@ import { createFpsGovernor } from './fpsGovernor.js';
 import { createTerrainMaterial } from './terrainMaterial.js';
 import { siteContours } from './contours.js';
 import { motionShadowSize } from './shadowLod.js';
+import { createFence } from './fence.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
@@ -23,9 +24,13 @@ const FPS_FLOOR = 30; // 2 s below this (after a grace period) steps quality dow
  * `quality`: preset name (see quality.js). `cellCss`: optional debug override of the
  * preset's cell size (`?cell=8`). `onAsciiChange({ on, reason, quality, ramp })` fires
  * on every quality change; reason is 'user' or 'auto' (low fps).
+ * `onFenceChange({ state, secondsLeft })` fires when the signal fence (fence.js)
+ * changes state or its countdown ticks a second; never per frame.
+ * `reducedMotion`: the fence snaps back instead of gliding (setReducedMotion to update).
  */
 export function createSurfaceScene(
-  canvas, site, { onFps, onAsciiChange, quality: startQuality = DEFAULT_QUALITY, cellCss } = {},
+  canvas, site,
+  { onFps, onAsciiChange, onFenceChange, quality: startQuality = DEFAULT_QUALITY, cellCss, reducedMotion = false } = {},
 ) {
   let quality = isQuality(startQuality) ? startQuality : DEFAULT_QUALITY;
   const preset = () => QUALITY_PRESETS[quality];
@@ -93,6 +98,28 @@ export function createSurfaceScene(
   controls.screenSpacePanning = true;
   controls.minZoom = 0.7;
   controls.maxZoom = 12;
+
+  // Signal fence: if the view centre leaves the surveyed square, warn, count down
+  // 5 s, then glide back to the landing site. Never touches the sim.
+  const fence = createFence({ half: extentM / 2, reducedMotion });
+  const onControlsStart = () => fence.userInput(); // never fight the player's drag or zoom
+  controls.addEventListener('start', onControlsStart);
+  let fenceShown = { state: 'inside', secondsLeft: 0 };
+  function updateFence(now) {
+    const t = controls.target;
+    const r = fence.tick(t.x, t.z, now);
+    if (r.target) {
+      // Move the camera and its target together: same view, new place.
+      const dx = r.target.x - t.x;
+      const dz = r.target.z - t.z;
+      camera.position.x += dx; camera.position.z += dz;
+      t.x += dx; t.z += dz;
+    }
+    if (r.state !== fenceShown.state || r.secondsLeft !== fenceShown.secondsLeft) {
+      fenceShown = { state: r.state, secondsLeft: r.secondsLeft };
+      onFenceChange?.(fenceShown);
+    }
+  }
 
   // ASCII: terrain -> small cell-aligned target -> one glyph pass on the canvas.
   const ascii = createAsciiRenderer(renderer, {
@@ -275,6 +302,7 @@ export function createSurfaceScene(
     if (now > motionUntil) applyShadowMap(stillShadowMap()); // still again: full-size shadows (no-op when already)
     for (const cb of frameSubs) cb(now);
     controls.update();
+    updateFence(now);
     draw();
     frames++;
     if (now - last >= 500) {
@@ -298,6 +326,8 @@ export function createSurfaceScene(
     onFrame,
     setAscii: (on) => setAscii(on),
     setQuality: (name) => setQuality(name),
+    setReducedMotion: (on) => { fence.reducedMotion = !!on; },
+    get fenceState() { return fenceShown; },
     get quality() { return quality; },
     get shadowStride() { return shadowStride; },
     get asciiOn() { return preset().ascii; },
@@ -308,6 +338,7 @@ export function createSurfaceScene(
       frameSubs.clear();
       window.removeEventListener('keydown', onKey);
       ro.disconnect();
+      controls.removeEventListener('start', onControlsStart);
       controls.dispose();
       ascii.dispose();
       skyMarkers.dispose();
