@@ -24,11 +24,12 @@ describe('ASCII quality presets', () => {
     }
   });
 
-  it('steps down one preset at a time and stops at Off', () => {
+  it('steps down one preset at a time but never picks Off on its own', () => {
     expect(lowerQuality('high')).toBe('balanced');
     expect(lowerQuality('balanced')).toBe('performance');
-    expect(lowerQuality('performance')).toBe('off');
-    expect(lowerQuality('off')).toBe('off');
+    expect(lowerQuality('performance')).toBe('performance');
+    expect(lowerQuality('off')).toBe('off'); // the player's Off is kept
+    expect(lowerQuality('bogus')).toBe('balanced');
   });
 
   it('picks the start quality: ?ascii=0, then ?quality, then saved, then default', () => {

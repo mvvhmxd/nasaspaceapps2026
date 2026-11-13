@@ -31,9 +31,12 @@ function pointer(color, headSegments) {
   const mat = material(color);
   const len = OUTER_M - INNER_M - HEAD_M;
   const shaft = new THREE.Mesh(flat(new THREE.PlaneGeometry(SHAFT_M, len)), mat);
+  shaft.name = 'shaft';
   shaft.position.z = -(INNER_M + len / 2);
   const solid = new THREE.Mesh(flat(new THREE.CircleGeometry(HEAD_M, headSegments)), mat);
   const hollow = new THREE.Mesh(flat(new THREE.RingGeometry(HEAD_M * 0.6, HEAD_M, headSegments)), mat);
+  solid.name = 'solid';
+  hollow.name = 'hollow';
   for (const head of [solid, hollow]) head.position.z = -(OUTER_M - HEAD_M);
   g.add(shaft, solid, hollow);
   g.renderOrder = 10;
@@ -58,6 +61,8 @@ function pointer(color, headSegments) {
 export function createSkyMarkers() {
   const sun = pointer(PALETTE.amber, 32);
   const earth = pointer(PALETTE.teal, 4); // 4 segments = diamond
+  sun.group.name = 'sun';
+  earth.group.name = 'earth';
   const group = new THREE.Group();
   group.add(sun.group, earth.group);
   return {

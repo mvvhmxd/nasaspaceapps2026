@@ -15,10 +15,16 @@ describe('sky markers', () => {
   it('show a solid head above the horizon and a hollow one below', () => {
     const m = createSkyMarkers();
     m.set({ sunAz: 90, sunlit: true, earthAz: 10, earthVisible: false });
-    const [sun, earth] = m.group.children;
-    const heads = (g) => g.children.slice(1).map((h) => h.visible); // [solid, hollow]
-    expect(heads(sun)).toEqual([true, false]);
-    expect(heads(earth)).toEqual([false, true]);
+    const heads = (body) => {
+      const g = m.group.getObjectByName(body);
+      return { solid: g.getObjectByName('solid').visible, hollow: g.getObjectByName('hollow').visible };
+    };
+    expect(heads('sun')).toEqual({ solid: true, hollow: false });
+    expect(heads('earth')).toEqual({ solid: false, hollow: true });
+    // and it follows the next hour's state
+    m.set({ sunAz: 90, sunlit: false, earthAz: 10, earthVisible: true });
+    expect(heads('sun')).toEqual({ solid: false, hollow: true });
+    expect(heads('earth')).toEqual({ solid: true, hollow: false });
     m.dispose();
   });
 });

@@ -61,6 +61,11 @@ button:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-of
   .top-right { top: auto; bottom: 64px; }
 }
 
-.map-legend { left: 12px; bottom: 76px; display: grid; gap: 2px; font-size: 12px; }
+.map-legend { left: 12px; bottom: 76px; font-size: 12px; }
+.map-legend ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .compass { display: flex; align-items: center; gap: 6px; color: #fff; }
 @media (max-width: 600px) { .map-legend { display: none; } }

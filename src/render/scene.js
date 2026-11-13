@@ -1,6 +1,6 @@
 // Surface view: lit terrain, a low Sun casting real shadows, the lander, and
 // the coloured ASCII pass. Quality presets (High / Balanced / Performance / Off) come
-// from quality.js; `A` toggles Off and back; below 30 fps it steps down one preset.
+// from quality.js; `A` toggles Off and back; at low fps it steps down to Performance at most.
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -12,11 +12,12 @@ import { createTopDownCamera, fitTopDown, gridOffsetPx } from './camera.js';
 import { createAsciiPass } from './ascii.js';
 import { createSkyMarkers } from './markers.js';
 import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
+import { createFpsGovernor } from './fpsGovernor.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
-const FPS_FLOOR = 30; // three readings below this step the quality down one preset
+const FPS_FLOOR = 30; // 2 s below this (after a grace period) steps quality down, not past Performance
 
 /**
  * `quality`: preset name (see quality.js). `cellCss`: optional debug override of the
@@ -35,7 +36,7 @@ export function createSurfaceScene(
   const pixelRatio = Math.min(window.devicePixelRatio, 2);
   renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap; // three.js removed PCFSoftShadowMap and fell back to this anyway
   renderer.setClearColor(PALETTE.navy);
 
   const scene = new THREE.Scene();
@@ -60,7 +61,8 @@ export function createSurfaceScene(
   scene.add(terrain);
 
   // Lander marker: drawn far larger than a real lander so it reads at 10 km
-  // (not to scale). It neither casts nor receives shadows.
+  // (not to scale). It neither casts nor receives shadows. It and the Sun / Earth
+  // pointers keep a constant on-screen size at every zoom (see draw()).
   const eye = landerEye(hm);
   const lander = new THREE.Group();
   const bodyMat = new THREE.MeshBasicMaterial({ color: PALETTE.grey });
@@ -88,14 +90,19 @@ export function createSurfaceScene(
 
   // ASCII chain: scene -> glyph pass -> output (tone mapping + sRGB once).
   const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
+  const scenePass = new RenderPass(scene, camera);
+  // Clear to transparent so the glyph pass can tell empty space from dark terrain.
+  scenePass.clearColor = new THREE.Color(PALETTE.navy);
+  scenePass.clearAlpha = 0;
+  composer.addPass(scenePass);
   const ascii = createAsciiPass({ cellCss: cellCss || preset().cellCss, pixelRatio, glyphs: preset().glyphs });
   composer.addPass(ascii.pass);
   composer.addPass(new OutputPass());
 
   let lastAsciiQuality = preset().ascii ? quality : DEFAULT_QUALITY; // where `A` returns to
   let lastReason = 'user';
-  let lowFpsStreak = 0;
+  const governor = createFpsGovernor({ floor: FPS_FLOOR });
+  governor.reset(performance.now()); // ignore the start-up hitch
 
   function applyShadowMap(size) {
     if (sun.shadow.mapSize.x === size) return;
@@ -108,7 +115,7 @@ export function createSurfaceScene(
     if (!isQuality(name) || name === quality) return;
     quality = name;
     lastReason = reason;
-    lowFpsStreak = 0;
+    governor.reset(performance.now()); // ignore the hitch from rebuilding atlas / shadow map
     const p = preset();
     if (p.ascii) {
       lastAsciiQuality = name;
@@ -149,13 +156,17 @@ export function createSurfaceScene(
     skyMarkers.set(sky);
   }
 
+  // Exact drawing-buffer size: three.js floors w * dpr, which differs from
+  // clientWidth * dpr at fractional scales (125 %, 150 %) common on Windows laptops.
+  const buffer = new THREE.Vector2();
   function resize() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
-    ascii.setSize(w * pixelRatio, h * pixelRatio);
+    renderer.getDrawingBufferSize(buffer);
+    ascii.setSize(buffer.x, buffer.y);
     fitTopDown(camera, w / h);
   }
   const ro = new ResizeObserver(resize);
@@ -163,8 +174,9 @@ export function createSurfaceScene(
   resize();
 
   function draw() {
+    lander.scale.setScalar(1 / camera.zoom); // constant screen size
     if (preset().ascii) {
-      const [ox, oy] = gridOffsetPx(camera, canvas.clientHeight * pixelRatio, ascii.cellPx);
+      const [ox, oy] = gridOffsetPx(camera, buffer.y, ascii.cellPx);
       ascii.setGridOffset(ox, oy);
       camera.layers.set(0); // terrain only through the glyph pass
       composer.render();
@@ -191,10 +203,9 @@ export function createSurfaceScene(
       onFps?.(fps);
       frames = 0;
       last = now;
-      if (preset().ascii && !document.hidden) {
-        lowFpsStreak = fps < FPS_FLOOR ? lowFpsStreak + 1 : 0;
-        // Shed cell detail before giving up the ASCII look (spec 8.1).
-        if (lowFpsStreak >= 3) setQuality(lowerQuality(quality), 'auto');
+      // Shed cell detail before giving up the ASCII look (spec 8.1).
+      if (preset().ascii && governor.sample(fps, now, document.hidden)) {
+        setQuality(lowerQuality(quality), 'auto');
       }
     }
   });
@@ -205,7 +216,6 @@ export function createSurfaceScene(
     setSky,
     setAscii: (on) => setAscii(on),
     setQuality: (name) => setQuality(name),
-    setCell: (css) => ascii.setCell(css, pixelRatio),
     get quality() { return quality; },
     get asciiOn() { return preset().ascii; },
     get autoOff() { return quality === 'off' && lastReason === 'auto'; },

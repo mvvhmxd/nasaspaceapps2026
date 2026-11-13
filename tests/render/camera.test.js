@@ -11,12 +11,15 @@ function toPx(cam, x, z) {
   return [((v.x + 1) / 2) * W, ((v.y + 1) / 2) * H];
 }
 const wrap = (v) => ((v % CELL) + CELL) % CELL;
+// Distance on a circle of length CELL (9.9999 and 0.0001 are 0.0002 apart).
+const cellDist = (a, b) => { const d = Math.abs(a - b) % CELL; return Math.min(d, CELL - d); };
 
 describe('gridOffsetPx', () => {
   it('keeps a ground point at the same spot inside its glyph cell while panning', () => {
     const cam = createTopDownCamera(10000, W / H);
     cam.zoom = 2.5;
     cam.updateProjectionMatrix();
+    // a fractional-scale buffer height (768 CSS px at 125 %) is covered by H below
     const ref = () => {
       const [px, py] = toPx(cam, 1234, -567);
       const [ox, oy] = gridOffsetPx(cam, H, CELL);
@@ -27,8 +30,8 @@ describe('gridOffsetPx', () => {
       cam.position.x += dx;
       cam.position.z += dz;
       const now = ref();
-      expect(Math.abs(now[0] - start[0]) % CELL).toBeLessThan(1e-3);
-      expect(Math.abs(now[1] - start[1]) % CELL).toBeLessThan(1e-3);
+      expect(cellDist(now[0], start[0])).toBeLessThan(1e-3);
+      expect(cellDist(now[1], start[1])).toBeLessThan(1e-3);
     }
   });
 

@@ -20,10 +20,16 @@ export function isQuality(name) {
   return Object.hasOwn(QUALITY_PRESETS, name);
 }
 
-/** Next step down when the frame rate is too low; Off stays Off. */
+/** Lowest preset the low-fps fallback may pick on its own. ASCII is the game's
+ * identity (spec 8.1), so only the player can choose Off. */
+export const AUTO_FLOOR = 'performance';
+
+/** Next step down when the frame rate is too low; stops at AUTO_FLOOR. */
 export function lowerQuality(name) {
   const i = QUALITY_ORDER.indexOf(name);
-  return QUALITY_ORDER[Math.min(i + 1, QUALITY_ORDER.length - 1)] ?? DEFAULT_QUALITY;
+  const floor = QUALITY_ORDER.indexOf(AUTO_FLOOR);
+  if (i < 0) return DEFAULT_QUALITY;
+  return QUALITY_ORDER[Math.max(i, Math.min(i + 1, floor))];
 }
 
 /**
