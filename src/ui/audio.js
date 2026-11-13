@@ -34,6 +34,9 @@ const SOUNDS = {
   success: { type: 'sine', notes: [[523, 0, 0.14], [659, 0.12, 0.14], [784, 0.24, 0.14], [1047, 0.36, 0.4]] },
   slip: { type: 'square', notes: [[330, 0, 0.16], [262, 0.2, 0.16], [330, 0.4, 0.16], [262, 0.6, 0.22]] },
   land: { type: 'sine', notes: [[196, 0, 0.25], [262, 0.2, 0.3]] },
+  iceCollected: { type: 'triangle', notes: [[659, 0, 0.1], [880, 0.09, 0.1], [1319, 0.18, 0.25]] },
+  iceDelivered: { type: 'sine', notes: [[523, 0, 0.12], [784, 0.1, 0.12], [1047, 0.2, 0.3]] },
+  roverLost: { type: 'sawtooth', notes: [[196, 0, 0.25], [147, 0.22, 0.5]] },
 };
 export const SOUND_NAMES = Object.keys(SOUNDS);
 

@@ -20,7 +20,7 @@ Missions to the lunar south pole depend on two things a planner cannot change: s
 1. **Pick a mission.** Three missions, each adding one idea: sunlight, Earth contact, launch slip.
 2. **Plan.** Choose a site and a landing day. Amber bars show how sunlit the mission would be, teal shows Earth contact.
 3. **Schedule** (missions 2 and 3). Paint Drill, Transmit and Sleep onto 6-hour blocks and watch the battery forecast.
-4. **Survive.** Time runs hour by hour. Space pauses, S forces the lander to sleep, 1×/4×/16× change speed.
+4. **Survive and explore.** Time runs hour by hour while you drive a rover (W A S D or the arrow keys, at 1× speed) to ice prospects in the dark low ground, park to drill, and bring the ice back to the lander. In shadow the rover's battery only drains, so every trip is a bet on getting back to sunlight. Press V for the surface view: you stand at the rover and see the real horizon, with the Sun and Earth where SPICE puts them. Drag to look around. Space pauses, Z forces the lander to sleep, G toggles the ASCII look, 1×/4×/16× change speed.
 5. **Debrief.** One star for surviving, two for returning 70% of the best automatic plan's science, three for 90%.
 
 Science only counts once it is transmitted, and that needs Earth above the horizon. Data still on board when the battery dies is lost.
@@ -57,7 +57,10 @@ Rule: **SPICE computes, Horizons verifies.**
 The offline pipeline that produces `public/sites/<id>.json` is in [`pipeline/`](pipeline/README.md). Raw kernels and elevation files are downloaded by it and are never committed.
 
 ## What is simplified
-- **Battery numbers are game values,** balanced for play. They are not from a real lander.
+- **Battery numbers are game values,** balanced for play. They are not from a real lander or rover.
+- **Ice prospects are chosen by rule:** the deepest reachable low ground in each 10 km map. They are prospects, not known ice deposits.
+- **Rover lighting is approximate:** local terrain within the 10 km map plus the lander's far horizon.
+- **Surface view:** the Sun and Earth are at their true positions but drawn 3× their true size. Beyond the 10 km map the horizon is a silhouette built from the site's real horizon as seen from the lander. Earth's face is a drawing, not an image, and shows no phase.
 - **The Sun is a point.** It counts as up when its centre clears the horizon; the real disc is about 0.5° wide, so real sunrise is gradual.
 - **Terrain grid is 40 m** and the lander's eye is 2 m above it. Boulders and small bumps are not modelled.
 - **On-map shadows are a visual aid.** They use only the 10 km around the site. The SUNLIT / IN SHADOW status is the calculated truth and uses the 250 km horizon.

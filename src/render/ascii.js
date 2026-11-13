@@ -77,6 +77,7 @@ const AsciiShader = {
     shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
     sunColor: { value: new THREE.Color(PALETTE.amber) },
     emptyColor: { value: new THREE.Color(PALETTE.navy) }, // drawn where there is no terrain
+    dots: { value: 0 }, // 1 = halftone dots sized by brightness (surface view) instead of glyphs
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -100,6 +101,7 @@ const AsciiShader = {
     uniform vec3 shadowColor;
     uniform vec3 sunColor;
     uniform vec3 emptyColor;
+    uniform float dots;
     varying vec2 vUv;
 
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -123,6 +125,19 @@ const AsciiShader = {
       vec2 local = fract(gl_FragCoord.xy / cell);
       vec2 glyphUv = vec2((idx + local.x) / glyphCount, local.y);
       float ink = texture(tGlyph, glyphUv).r;
+
+      if (dots > 0.5) {
+        // Halftone: one round dot per cell, radius grows with brightness, keeps the scene's own colour.
+        // A grazing Sun leaves most ground dim, so the dot size uses a brighter curve than the glyphs.
+        float dl = smoothstep(0.015, 0.4, y);
+        float radius = 0.5 * sqrt(dl);
+        float edge = 1.0 / cell;
+        float dotInk = 1.0 - smoothstep(radius - edge, radius + edge, length(local - 0.5));
+        vec3 base = mix(vec3(dot(scene, LUMA)), scene, 0.75);
+        vec3 dotColor = clamp(base / max(max(base.r, max(base.g, base.b)), 0.001) * mix(0.55, 1.0, dl), 0.0, 1.0);
+        gl_FragColor = vec4(mix(emptyColor * 0.35, dotColor, dotInk * step(0.01, dl)), 1.0);
+        return;
+      }
 
       // Colour: boosted scene colour blended with the palette grade.
       vec3 grey = vec3(dot(scene, LUMA));
@@ -149,6 +164,9 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
     ramp: '',
     setSize(w, h) {
       pass.uniforms.resolution.value.set(w, h);
+    },
+    setDots(on) {
+      pass.uniforms.dots.value = on ? 1 : 0;
     },
     setCell(css, dpr) {
       const cellPx = Math.max(4, Math.round(css * dpr));

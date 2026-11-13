@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadSite } from './data/loadSite.js';
 import { stateAt } from './sim/visibility.js';
 import { initialState, advance, MODES } from './sim/survival.js';
+import { findIceTargets, initialRover, stepRover, iceScore } from './sim/rover.js';
 import { createSurfaceScene } from './render/scene.js';
 import { MISSIONS, missionById } from './game/missions.js';
 import { loadProgress, saveProgress, recordStars, nextMissionId, isUnlocked } from './game/progress.js';
@@ -13,10 +14,12 @@ import { emptySchedule, planFrom } from './game/schedule.js';
 import { ASCII_QUALITY, loadSettings, saveSettings } from './game/settings.js';
 import { unlockAudio, setVolume, play } from './ui/audio.js';
 import Compass from './ui/Compass.jsx';
-import MissionHud, { MissionStatus } from './ui/MissionHud.jsx';
+import MissionHud, { MissionStatus, RoverStatus } from './ui/MissionHud.jsx';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
 const TICK_MS = 500;
+const ROVER_STEP_MS = 50; // rover moves in small steps between the hourly sim ticks
+const DRIVE_KEYS = { ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 const ALL_SITE_IDS = [...new Set(MISSIONS.flatMap((m) => m.siteIds))];
 const sleepPlan = () => MODES.ASLEEP;
 const params = new URLSearchParams(location.search);
@@ -28,6 +31,10 @@ export default function App() {
   const sceneRef = useRef(null);
   const simRef = useRef(null);
   const eventsRef = useRef([]);
+  const roverRef = useRef(null);
+  const keysRef = useRef(new Set());
+  const [rover, setRover] = useState(null);
+  const [view, setView] = useState('map');
   const [sites, setSites] = useState(null); // { id: site }
   const [error, setError] = useState(null);
   const [screen, setScreen] = useState('title'); // title | missions | brief | planner | schedule | surface | debrief
@@ -105,6 +112,7 @@ export default function App() {
     [missionSites, cfg],
   );
   const best = useMemo(() => (missionSites.length ? bestPlan(missionSites, cfg) : null), [missionSites, cfg]);
+  const targets = useMemo(() => (site ? findIceTargets(site) : []), [site]);
 
   // The hour shown on the map: the sim's hour while flying, else the planned landing hour.
   const inMission = (screen === 'surface' || screen === 'debrief') && sim;
@@ -116,7 +124,21 @@ export default function App() {
     const { renderBlocked: rb } = sceneRef.current.setSun(sky.sunAz, sky.sunEl);
     setRenderBlocked(rb);
     sceneRef.current.setLanderInShadow(!sky.sunlit); // the sim decides
+    sceneRef.current.setEarth(sky.earthAz, sky.earthEl);
   }, [site, sky?.hour]);
+
+  // Rover, prospects and view on the map: only while a mission is running.
+  const onSurface = screen === 'surface' && !!rover;
+  const collectedKey = rover?.collected.join(',') ?? '';
+  useEffect(() => {
+    const sc = sceneRef.current;
+    if (!sc) return;
+    sc.setRover(onSurface ? rover : null);
+    sc.setView(onSurface ? view : 'map');
+  }, [site, onSurface, rover, view]);
+  useEffect(() => {
+    sceneRef.current?.setProspects(onSurface ? targets : [], onSurface ? rover.collected : []);
+  }, [site, onSurface, targets, collectedKey]);
 
   function resetPlan(id) {
     setSiteId(missionById(id).siteIds[0]);
@@ -142,6 +164,10 @@ export default function App() {
     const s = initialState(cfg, landingDay * 24);
     planRef.current = mission.schedule ? planFrom(schedule, landingDay * 24) : undefined;
     simRef.current = s;
+    roverRef.current = initialRover();
+    setRover(roverRef.current);
+    setView('map');
+    keysRef.current.clear();
     eventsRef.current = [];
     setSim(s);
     setEvents([]);
@@ -202,10 +228,12 @@ export default function App() {
         [...new Set(r.events.map((e) => e.type))].sort((a, b) => order.indexOf(a) - order.indexOf(b)).slice(0, 2).forEach(play);
       }
       if (r.state.done) {
-        const stars = starsFor(r.state, best.score, cfg.starThresholds);
+        const ice = iceScore(roverRef.current);
+        const total = r.state.score + ice;
+        const stars = starsFor({ ...r.state, score: total }, best.score, cfg.starThresholds);
         setPlaying(false);
         setResult({
-          state: r.state, events: eventsRef.current, mission, stars, best, slip,
+          state: r.state, events: eventsRef.current, mission, stars, best, slip, rover: roverRef.current, ice, total,
           siteName: site.name, bestSiteName: sites[best.siteId].name, landingDay: r.state.startHour / 24,
         });
         setProgress((p) => { const next = recordStars(p, mission.id, stars); saveProgress(next); return next; });
@@ -215,18 +243,62 @@ export default function App() {
     return () => clearInterval(id);
   }, [screen, playing, overlay, site, speed, forceSleep, best, slip, mission, cfg, sites]);
 
+  // Rover clock: small steps so driving is smooth. The rover only takes input at 1x speed.
+  useEffect(() => {
+    if (screen !== 'surface' || !playing || overlay || !site) return;
+    const id = setInterval(() => {
+      const cur = roverRef.current;
+      if (!cur || !simRef.current || simRef.current.done) return;
+      const k = keysRef.current, sc = sceneRef.current;
+      const input = { east: 0, north: 0 };
+      if (speed === 1 && cur.alive) {
+        const f = (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0);
+        const side = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0);
+        if (sc?.view === 'surface') {
+          if (side) sc.turn(side * 2.5);
+          const a = (sc.yaw * Math.PI) / 180;
+          input.east = Math.sin(a) * f;
+          input.north = Math.cos(a) * f;
+        } else {
+          input.east = side;
+          input.north = f;
+        }
+      }
+      const hour = Math.min(simRef.current.hour, site.hours - 1);
+      const r = stepRover(site, cur, input, (ROVER_STEP_MS / TICK_MS) * speed, stateAt(site, hour), targets);
+      if (r.rover === cur) return;
+      roverRef.current = r.rover;
+      setRover(r.rover);
+      if (r.events.length) {
+        eventsRef.current = [...eventsRef.current, ...r.events.map((type) => ({ hour, type }))];
+        setEvents(eventsRef.current);
+        r.events.forEach(play);
+      }
+    }, ROVER_STEP_MS);
+    return () => clearInterval(id);
+  }, [screen, playing, overlay, site, speed, targets]);
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && overlay) setOverlay(null);
       if (screen !== 'surface' || overlay || e.target.closest?.('input, a')) return;
       if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) setPlaying((p) => !p); }
-      if ((e.key === 's' || e.key === 'S') && !e.repeat) setForceSleep((f) => !f);
+      if (e.code === 'KeyZ' && !e.repeat) setForceSleep((f) => !f);
+      if (e.code === 'KeyV' && !e.repeat) setView((v) => (v === 'map' ? 'surface' : 'map'));
+      if (DRIVE_KEYS[e.code]) { e.preventDefault(); keysRef.current.add(DRIVE_KEYS[e.code]); }
     };
+    const onRelease = (e) => { if (DRIVE_KEYS[e.code]) keysRef.current.delete(DRIVE_KEYS[e.code]); };
+    const onBlur = () => keysRef.current.clear();
+    window.addEventListener('keyup', onRelease);
+    window.addEventListener('blur', onBlur);
     // A focused button also "clicks" on Space key-up; stop that so Space toggles once.
     const onKeyUp = (e) => { if (screen === 'surface' && !overlay && e.code === 'Space') e.preventDefault(); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+    return () => {
+      window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('keyup', onRelease); window.removeEventListener('blur', onBlur);
+    };
   }, [screen, overlay]);
 
   if (error) {
@@ -260,13 +332,14 @@ export default function App() {
                 </div>
               </div>
               {screen === 'surface' && sim && <MissionStatus site={site} sim={sim} sky={sky} forceSleep={forceSleep} />}
+              {screen === 'surface' && rover && <RoverStatus rover={rover} targets={targets} speed={speed} />}
             </div>
           )}
           <div className="hud top-right">
             {DEBUG && <div>{fps} fps</div>}
             <div>
               <button className={ascii.on ? 'on' : ''} aria-pressed={ascii.on} onClick={() => sceneRef.current?.setAscii(!ascii.on)}>
-                ASCII {ascii.on ? 'on' : 'off'} (A)
+                ASCII {ascii.on ? 'on' : 'off'} (G)
               </button>
               {ascii.reason === 'auto' && !ascii.on && <div className="dark">switched off: low fps</div>}
             </div>
@@ -307,7 +380,8 @@ export default function App() {
           {screen === 'surface' && sim && (
             <MissionHud
               sim={sim} events={events}
-              playing={playing} speed={speed} speeds={SPEEDS} forceSleep={forceSleep}
+              playing={playing} speed={speed} speeds={SPEEDS} forceSleep={forceSleep} view={view}
+              onView={() => setView((v) => (v === 'map' ? 'surface' : 'map'))}
               onPlay={() => setPlaying((p) => !p)} onSpeed={setSpeed}
               onSleep={() => setForceSleep((f) => !f)} onAbort={retry}
             />

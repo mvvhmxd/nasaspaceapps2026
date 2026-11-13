@@ -49,6 +49,7 @@ The offline pipeline is separate: `pipeline/` turns LOLA and SPICE data into the
 | `src/sim/config.js` | `SIM_CONFIG`: game-balanced battery, drain, store and star thresholds | survival sim, planner |
 | `src/sim/survival.js` | `initialState`, `advance(site, state, hours, plan?)` → `{ state, events }`; `MODES` | survival sim, schedule forecast, solver |
 | `src/sim/planner.js` | `previewStats(site, startHour, lengthH, config)` for the preview card | site planner |
+| `src/sim/rover.js` | rover rules: `stepRover`, `sunlitAt` (local terrain + far mask), `findIceTargets`, `ROVER` game values | rover, surface view |
 | `src/sim/solver.js` | `bestStart(site, config, stride)`: best automatic-plan landing hour | debrief stars |
 | `src/game/missions.js` | the three missions: sites, length, slip, briefing text | campaign |
 | `src/game/schedule.js` | 6-hour blocks, `planFrom`, `blockSky`, `forecast` (runs `advance`) | task schedule |

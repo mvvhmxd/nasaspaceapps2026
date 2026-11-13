@@ -75,7 +75,8 @@ export function Brief({ mission, index, onNext, onBack }) {
         <li><span className="comms">&#9670; Earth in view</span> data can be transmitted</li>
         <li><span className="dark">&#9679; In shadow</span> battery drains; sleep to save power</li>
       </ul>
-      <p className="dim small">Stars: 1 for surviving, 2 for returning 70% of the best possible science, 3 for 90%.</p>
+      <p><b>Your rover.</b> While the lander works, you drive a rover to ice prospects in the dark low ground (teal markers), park to drill, and bring the ice back. Each delivered sample adds science. In shadow the rover&rsquo;s battery only drains: get back to sunlight in time.</p>
+      <p className="dim small">Stars: 1 for surviving, 2 for returning 70% of the best automatic plan&rsquo;s science, 3 for 90%. Ice counts toward the total.</p>
       <div className="row">
         <button onClick={onBack}>Back</button>
         <button className="primary" onClick={onNext} autoFocus>Plan the landing</button>
@@ -93,6 +94,7 @@ export function Help({ onClose }) {
       <p><b>Terrain.</b> The map and the horizon come from NASA&rsquo;s LOLA laser-altimeter elevation model of the south pole. The horizon looks out to 250 km, because a distant ridge can hide a Sun that is only 1&deg; up.</p>
       <p><b>Simplifications.</b> The Sun counts as up when its centre clears the horizon (the real disc is about 0.5&deg; wide, so real sunrise is gradual). The lander&rsquo;s eye is 2 m above a 40 m terrain grid, so boulders and small bumps are not modelled. The 3D shadows drawn on the map use only the 10 km around the site and are a visual aid; the SUNLIT / IN SHADOW status is the calculated truth.</p>
       <p><b>Power.</b> Battery numbers are <b>game values</b>, balanced for play, not taken from a real lander. Sunlit hours charge; every hour drains; sleeping drains least.</p>
+      <p><b>Rover.</b> Drive with W A S D or the arrow keys (only at 1&times; speed). V switches between the map and the surface view; in the surface view, drag to look around and A / D turn. Ice prospects are the deepest reachable low ground in the 10 km map, chosen by rule; they are prospects, not known ice deposits. The rover&rsquo;s sunlight uses the local terrain plus the lander&rsquo;s far horizon, which is an approximation away from the lander. In the surface view the Sun and Earth are drawn 3&times; their true size, at their true positions.</p>
       <p><b>Science.</b> Drilling fills the data store in sunlight. Data scores only when transmitted with Earth in view. Transmitting in the dark costs battery you cannot get back until sunrise: use Force sleep.</p>
       <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
     </div>
@@ -161,7 +163,7 @@ export function Settings({ settings, onChange, onTest, onClose }) {
 const STAR_TEXT = ['Power down', 'Survived', 'Good plan', 'Near-perfect plan'];
 
 export function Debrief({ result, onRetry, onNext, onMissions, onHelp }) {
-  const { state, stars, best, bestSiteName, siteName, landingDay, slip, events, mission } = result;
+  const { state, stars, best, bestSiteName, siteName, landingDay, slip, events, mission, rover, ice, total } = result;
   const count = (t) => events.filter((e) => e.type === t).length;
   return (
     <div className="panel center" role="dialog" aria-label="Debrief">
@@ -170,7 +172,9 @@ export function Debrief({ result, onRetry, onNext, onMissions, onHelp }) {
       <div className="stars"><Stars n={stars} /> <span className="dim">{STAR_TEXT[stars]}</span></div>
       <table className="stats">
         <tbody>
-          <tr><th>Science returned</th><td>{state.score} packets</td></tr>
+          <tr><th>Science returned by the lander</th><td>{state.score} packets</td></tr>
+          <tr><th>Ice delivered by the rover</th><td>{rover.delivered} sample{rover.delivered === 1 ? '' : 's'} = {ice} packets{rover.alive ? '' : ' (rover lost)'}</td></tr>
+          <tr className="best"><th>Total science</th><td>{total} packets</td></tr>
           <tr><th>Best automatic plan</th><td>{best.score} packets ({bestSiteName}, day {best.day + 1})</td></tr>
           <tr><th>Your landing</th><td>{siteName}, day {landingDay + 1}{slip ? ` (after a ${slip}-day slip)` : ''}</td></tr>
           <tr><th>Hours survived</th><td>{state.hour - state.startHour} of {state.config.missionHours}</td></tr>
@@ -179,7 +183,7 @@ export function Debrief({ result, onRetry, onNext, onMissions, onHelp }) {
           {!state.alive && <tr><th>Data lost on board</th><td>all unsent packets</td></tr>}
         </tbody>
       </table>
-      {!state.alive && <p className="dim small">Tip: transmitting or staying awake in the dark drains the battery. Use Force sleep (S) before a long shadow, or pick a day with less darkness.</p>}
+      {!state.alive && <p className="dim small">Tip: transmitting or staying awake in the dark drains the battery. Use Force sleep (Z) before a long shadow, or pick a day with less darkness.</p>}
       <div className="row">
         {onNext && <button className="primary" onClick={onNext} autoFocus>Next mission</button>}
         <button className={onNext ? '' : 'primary'} onClick={onRetry} autoFocus={!onNext}>Replan and retry</button>
