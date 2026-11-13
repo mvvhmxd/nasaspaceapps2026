@@ -24,3 +24,28 @@ pip install -r requirements.txt
 pytest
 ```
 Downloaded data goes in `data/raw/`, which is git-ignored. Never commit kernels or DEMs.
+
+## Status (2026-11-13)
+Working with real NASA data:
+- `01_download_kernels.py`: downloads `naif0012.tls`, `pck00011.tpc`, `de440s.bsp`, `moon_pa_de440_200625.bpc`, `moon_de440_250416.tf` from NAIF into `data/raw/kernels/`.
+- `04_ephemeris.py`: hourly Sun and Earth az/el at a surface point (SPICE `spkcpo`, `MOON_ME` frame, `LT+S`, 1737.4 km sphere).
+- `06_validate.py`: the same series from the JPL Horizons API (`CENTER='coord@301'`, quantity 4, airless), with a report in `validation/<id>.json`.
+
+Validation results (tolerance 0.02 deg):
+
+| Point | Window | Max separation, Sun | Max separation, Earth |
+|---|---|---|---|
+| lat -89.5, lon 0 | 1440 h from 2027-03-01 | 0.00007 deg | 0.00007 deg |
+| lat -85.3, lon 31.7 E | 720 h from 2028-07-10 | 0.00007 deg | 0.00007 deg |
+
+These two points are validation test points, not selected landing sites.
+
+Still stubs: `02_fetch_dem.py`, `03_crop_local_frame.py`, `05_horizon_mask.py`, `07_export_site.py`. Terrain (LOLA) is not downloaded yet, so no real site file exists and the game still uses the illustrative demo site.
+
+```bash
+python scripts/01_download_kernels.py
+python scripts/04_ephemeris.py --id test-point --lat -89.5 --lon 0 --start 2027-03-01T00:00:00 --hours 1440
+python scripts/06_validate.py --id test-point
+```
+
+Challenge resources (from the Space Apps page): LROC QuickMap, NASA Moon Trek, JPL Horizons, CSA Moon exploration.
