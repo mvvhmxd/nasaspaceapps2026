@@ -38,9 +38,11 @@ export function buildTerrain(hm, { chunkCells = 32, material } = {}) {
       const hgt = r1 - r0 + 1;
       const pos = new Float32Array(w * hgt * 3);
       const nor = new Float32Array(w * hgt * 3);
+      const elev = new Float32Array(w * hgt); // raw DEM height, no curvature drop (contours)
       let k = 0;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
+          elev[k / 3] = heights[r * n + c];
           pos[k] = (c - half) * s;
           pos[k + 1] = worldY(r, c);
           pos[k + 2] = (r - half) * s;
@@ -64,6 +66,7 @@ export function buildTerrain(hm, { chunkCells = 32, material } = {}) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('aElev', new THREE.BufferAttribute(elev, 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       geo.computeBoundingBox();

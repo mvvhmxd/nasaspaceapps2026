@@ -26,3 +26,15 @@ export function fitTopDown(cam, aspect) {
   cam.bottom = -v;
   cam.updateProjectionMatrix();
 }
+
+/**
+ * Sub-cell shift (drawing-buffer pixels, each in [0, cellPx)) that keeps the ASCII
+ * glyph grid fixed to the ground while the top-down camera pans. Without it the
+ * grid stays put on screen and the terrain slides under it, so glyphs crawl.
+ * gl_FragCoord has its origin at the bottom-left; screen-up is north (-z).
+ */
+export function gridOffsetPx(cam, heightPx, cellPx) {
+  const pxPerM = (heightPx * cam.zoom) / (cam.top - cam.bottom);
+  const wrap = (v) => ((v % cellPx) + cellPx) % cellPx;
+  return [wrap(cam.position.x * pxPerM), wrap(-cam.position.z * pxPerM)];
+}

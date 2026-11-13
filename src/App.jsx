@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadSite } from './data/loadSite.js';
 import { stateAt } from './sim/visibility.js';
 import { initialState, advance, MODES } from './sim/survival.js';
@@ -17,6 +17,10 @@ import Compass from './ui/Compass.jsx';
 import MissionHud, { MissionStatus, RoverStatus } from './ui/MissionHud.jsx';
 import { initialQuality } from './render/quality.js';
 import AsciiQuality from './ui/AsciiQuality.jsx';
+import MapLegend from './ui/MapLegend.jsx';
+import HorizonStrip from './ui/HorizonStrip.jsx';
+import SignalFence from './ui/SignalFence.jsx';
+import { displaySample, createDisplayClock } from './render/skyClock.js';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
 const TICK_MS = 500;
@@ -27,10 +31,21 @@ const sleepPlan = () => MODES.ASLEEP;
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug'); // ?debug shows fps and the render-vs-sim shadow check
 const REPLAN_OVERRIDE = Number(params.get('replan')) || null; // ?replan=5 shortens the slip countdown for demos
+const EASE_MS = 450; // display easing of the Sun / Earth per hourly step; settles before the next tick
+const reducedMotionQuery = () => window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 export default function App() {
   const canvasRef = useRef(null);
   const sceneRef = useRef(null);
+  const [scene, setScene] = useState(null); // the live scene, for once-per-hour reads (render check)
+  const stripRef = useRef(null);
+  const fpsRef = useRef(null);
+  // Display clock: eases the Sun / Earth positions toward each new sim hour (positions only).
+  const clockRef = useRef(null);
+  if (!clockRef.current) {
+    clockRef.current = createDisplayClock({ durationMs: EASE_MS, reducedMotion: !!reducedMotionQuery()?.matches });
+  }
+  const [fence, setFence] = useState({ state: 'inside', secondsLeft: 0 }); // signal fence (render/fence.js)
   const simRef = useRef(null);
   const eventsRef = useRef([]);
   const roverRef = useRef(null);
@@ -60,8 +75,6 @@ export default function App() {
   const [speed, setSpeed] = useState(1);
   const [forceSleep, setForceSleep] = useState(false);
   const [result, setResult] = useState(null);
-  const [fps, setFps] = useState(0);
-  const [renderBlocked, setRenderBlocked] = useState(null);
   const [ascii, setAsciiState] = useState(() => {
     // ?ascii=0 and ?quality= win, then the player's saved setting.
     const quality = initialQuality(location.search, { getItem: () => loadSettings().ascii });
@@ -85,7 +98,10 @@ export default function App() {
   useEffect(() => {
     if (!site) return;
     const s = createSurfaceScene(canvasRef.current, site, {
-      onFps: setFps,
+      // Written straight to the DOM: an fps reading every 0.5 s must not re-render the app.
+      onFps: (f) => { if (fpsRef.current) fpsRef.current.textContent = `${f} fps`; },
+      onFenceChange: setFence, // fires on state / whole-second changes only
+      reducedMotion: !!reducedMotionQuery()?.matches,
       onAsciiChange: (a) => {
         setAsciiState(a);
         // A player's choice (menu, Settings or G) is saved in settings; low-fps steps are not.
@@ -96,13 +112,50 @@ export default function App() {
       autoOff: params.get('ascii') !== 'force', // ?ascii=force keeps the quality fixed on slow machines (demos, screenshots)
     });
     sceneRef.current = s;
-    return () => { s.dispose(); sceneRef.current = null; };
+    setScene(s);
+    setFence({ state: 'inside', secondsLeft: 0 });
+    clockRef.current.jump(viewHourRef.current, performance.now()); // first frame: no easing from hour 0
+
+    // Smooth frames between hourly samples. Positions only; truth stays hourly.
+    let easing = false;
+    const off = s.onFrame((now) => {
+      const clock = clockRef.current;
+      if (clock.animating(now)) {
+        easing = true;
+        const sample = displaySample(site, clock, now);
+        s.setSkySmooth(sample);
+        stripRef.current?.setSky({ ...sample, ...truthRef.current });
+      } else if (easing) {
+        easing = false; // settled: land exactly on the sim's whole-hour state
+        const exact = displaySample(site, clock, now);
+        s.setSkySmooth(exact, { final: true });
+        stripRef.current?.setSky({ ...exact, ...truthRef.current });
+      }
+    });
+    return () => { off(); s.dispose(); sceneRef.current = null; setScene(null); };
   }, [site]);
 
+  // Follow the OS reduced-motion setting live (easing and the fence glide).
+  useEffect(() => {
+    const mq = reducedMotionQuery();
+    if (!mq) return;
+    const onChange = () => {
+      clockRef.current.reducedMotion = mq.matches;
+      sceneRef.current?.setReducedMotion(mq.matches);
+    };
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+
   // Apply settings: sound level now, ASCII detail on the live map, and save them.
+  // The ASCII detail is applied only when that setting itself changes, so a volume
+  // change does not undo ?quality= or a low-fps step-down.
+  const prevAsciiRef = useRef(settings.ascii);
   useEffect(() => {
     setVolume(settings.volume, settings.muted);
     saveSettings(settings);
+    if (settings.ascii === prevAsciiRef.current) return;
+    prevAsciiRef.current = settings.ascii;
     const sc = sceneRef.current;
     if (sc && params.get('ascii') !== '0' && sc.quality !== settings.ascii) sc.setQuality(settings.ascii);
   }, [settings]);
@@ -126,17 +179,36 @@ export default function App() {
   // The hour shown on the map: the sim's hour while flying, else the planned landing hour.
   const inMission = (screen === 'surface' || screen === 'debrief') && sim;
   const viewHour = site ? Math.min(inMission ? sim.hour : day * 24, site.hours - 1) : 0;
-  const sky = site ? stateAt(site, viewHour) : null;
+  const sky = useMemo(() => (site ? stateAt(site, viewHour) : null), [site, viewHour]);
+  const viewHourRef = useRef(0);
+  viewHourRef.current = viewHour;
+  // The sim's truth flags for the hour on screen: the lander, the pointers and the
+  // strip markers show these, never an interpolated guess.
+  const truthRef = useRef(null);
+  truthRef.current = sky && { sunlit: sky.sunlit, earthVisible: sky.earthVisible };
+
+  // Render check (raycast against the terrain mesh), computed with the hour so the
+  // HUD needs one render per hour, not two. A read of the scene, no side effects.
+  const renderBlocked = useMemo(
+    () => (scene && sky ? scene.checkSun(sky.sunAz, sky.sunEl).renderBlocked : null),
+    [scene, sky],
+  );
 
   useEffect(() => {
-    if (!sky || !sceneRef.current) return;
-    const { renderBlocked: rb } = sceneRef.current.setSun(sky.sunAz, sky.sunEl, {
-      farBlocked: sky.sunBehindFarTerrain,
-    });
-    setRenderBlocked(rb);
-    sceneRef.current.setLanderInShadow(!sky.sunlit); // the sim decides
-    sceneRef.current.setEarth(sky.earthAz, sky.earthEl);
-  }, [site, sky?.hour]);
+    if (!sky || !scene) return;
+    scene.setLanderInShadow(!sky.sunlit); // the sim decides
+    scene.setSky(sky); // pointer flags, far-terrain Sun switch (and positions, until easing moves them)
+    const now = performance.now();
+    const clock = clockRef.current;
+    clock.setTarget(sky.hour, now);
+    if (!clock.animating(now)) {
+      // Snapped (reduced motion, scrub backwards, long jump): show the hour at once.
+      scene.setSkySmooth(sky, { final: true });
+      stripRef.current?.setSky(sky);
+    }
+  }, [scene, sky]);
+
+  const onQuality = useCallback((q) => sceneRef.current?.setQuality(q), []);
 
   // Rover, prospects and view on the map: only while a mission is running.
   const onSurface = screen === 'surface' && !!rover;
@@ -330,9 +402,12 @@ export default function App() {
   const agree = sky && renderBlocked !== null ? renderBlocked === sky.sunEl <= sky.sunNearMask : null;
   const next = nextMissionId(mission.id);
   const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
+  // Screens that show the map with its HUD (the strip, the key, the fence).
+  const mapScreen = screen === 'planner' || screen === 'schedule' || screen === 'surface';
+  const shownView = onSurface ? view : 'map'; // what the scene shows (setView above)
 
   return (
-    <div className={`app${hudHidden && screen === 'surface' ? ' nohud' : ''}`}>
+    <div className={`app${hudHidden && screen === 'surface' ? ' nohud' : ''}${screen === 'planner' ? ' on-planner' : ''}`}>
       <canvas ref={canvasRef} className="view" aria-label="Top-down terrain map of the landing site" />
       {!sites && <div className="msg">Loading landing sites&hellip;</div>}
       {site && sky && (
@@ -354,16 +429,20 @@ export default function App() {
             </div>
           )}
           <div className="hud top-right">
-            {DEBUG && <div>{fps} fps</div>}
-            <AsciiQuality ascii={ascii} onChange={(q) => sceneRef.current?.setQuality(q)} />
+            <AsciiQuality ascii={ascii} onChange={onQuality} />
+            {/* ?debug: fps and the render check share one line, so the panel stays short. */}
             <div hidden={!DEBUG}>
-              render check:{' '}
+              {DEBUG && <><span ref={fpsRef}>… fps</span> &middot; </>}render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}
             </div>
             <button onClick={() => setOverlay('help')}>How it works</button>
             <button onClick={() => setOverlay('settings')}>Settings</button>
             {(screen === 'planner' || screen === 'schedule' || screen === 'surface') && <Compass sky={sky} />}
           </div>
+
+          {mapScreen && <HorizonStrip ref={stripRef} site={site} sky={sky} playing={screen === 'surface' && playing} />}
+          {screen === 'surface' && shownView === 'map' && <MapLegend site={site} />}
+          {mapScreen && shownView === 'map' && <SignalFence fence={fence} />}
 
           {screen === 'title' && (
             <Title onStart={() => setScreen('missions')} onHelp={() => setOverlay('help')} onCredits={() => setOverlay('credits')} onSettings={() => setOverlay('settings')} />
