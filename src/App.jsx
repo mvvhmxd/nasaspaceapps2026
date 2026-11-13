@@ -148,9 +148,14 @@ export default function App() {
   }, []);
 
   // Apply settings: sound level now, ASCII detail on the live map, and save them.
+  // The ASCII detail is applied only when that setting itself changes, so a volume
+  // change does not undo ?quality= or a low-fps step-down.
+  const prevAsciiRef = useRef(settings.ascii);
   useEffect(() => {
     setVolume(settings.volume, settings.muted);
     saveSettings(settings);
+    if (settings.ascii === prevAsciiRef.current) return;
+    prevAsciiRef.current = settings.ascii;
     const sc = sceneRef.current;
     if (sc && params.get('ascii') !== '0' && sc.quality !== settings.ascii) sc.setQuality(settings.ascii);
   }, [settings]);
@@ -402,7 +407,7 @@ export default function App() {
   const shownView = onSurface ? view : 'map'; // what the scene shows (setView above)
 
   return (
-    <div className={`app${hudHidden && screen === 'surface' ? ' nohud' : ''}`}>
+    <div className={`app${hudHidden && screen === 'surface' ? ' nohud' : ''}${screen === 'planner' ? ' on-planner' : ''}`}>
       <canvas ref={canvasRef} className="view" aria-label="Top-down terrain map of the landing site" />
       {!sites && <div className="msg">Loading landing sites&hellip;</div>}
       {site && sky && (
@@ -424,10 +429,10 @@ export default function App() {
             </div>
           )}
           <div className="hud top-right">
-            {DEBUG && <div ref={fpsRef}>… fps</div>}
             <AsciiQuality ascii={ascii} onChange={onQuality} />
+            {/* ?debug: fps and the render check share one line, so the panel stays short. */}
             <div hidden={!DEBUG}>
-              render check:{' '}
+              {DEBUG && <><span ref={fpsRef}>… fps</span> &middot; </>}render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}
             </div>
             <button onClick={() => setOverlay('help')}>How it works</button>

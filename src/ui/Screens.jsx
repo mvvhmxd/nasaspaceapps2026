@@ -161,7 +161,7 @@ export function Settings({ settings, onChange, onTest, onClose }) {
               onClick={() => onChange({ ...settings, ascii: q.id })}>{q.label}</button>
           ))}
         </div>
-        <div className="dim small">Lower detail runs faster. The game switches ASCII off by itself if the frame rate drops too low.</div>
+        <div className="dim small">Lower detail runs faster. If the frame rate drops too low, the game steps the detail down by itself, to Performance at most; only you can turn ASCII off.</div>
       </fieldset>
       <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
     </div>

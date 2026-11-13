@@ -137,4 +137,17 @@ describe('fence state machine', () => {
     expect(r.state).toBe('outside'); // fresh countdown, no glide target
     expect(r.target).toBeNull();
   });
+
+  it('reset (a view change) drops a running countdown: back later starts a fresh 5 s', () => {
+    const f = createFence({ half: 1000 });
+    f.tick(1500, 0, 0); // countdown from t = 0
+    f.reset(); // V pressed: surface view
+    // back in the map 7 s later, still outside: no instant glide, a new countdown
+    let r = f.tick(1500, 0, 7000);
+    expect(r.state).toBe('outside');
+    expect(r.secondsLeft).toBe(5);
+    expect(r.target).toBeNull();
+    r = f.tick(1500, 0, 7000 + FENCE_COUNTDOWN_MS);
+    expect(r.state).toBe('returning');
+  });
 });

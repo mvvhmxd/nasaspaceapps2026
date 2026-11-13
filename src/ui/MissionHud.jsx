@@ -89,7 +89,9 @@ export default function MissionHud({ sim, events, playing, speed, speeds, forceS
   const cfg = sim.config;
   const elapsed = sim.hour - sim.startHour;
   return (
-    <>
+    // One column at the bottom right: the feed always sits above the bar, however
+    // many rows the bar wraps to.
+    <div className="mission-bottom">
       <div className="hud feed" aria-live="polite" aria-label="Mission events">
         {events.length === 0 && <div className="dim">No events yet</div>}
         {events.slice(-5).map((e, i) => {
@@ -119,6 +121,6 @@ export default function MissionHud({ sim, events, playing, speed, speeds, forceS
         <div className="progress" aria-hidden="true"><span style={{ width: `${(100 * elapsed) / cfg.missionHours}%` }} /></div>
         <button onClick={onAbort}>Abort to planner</button>
       </div>
-    </>
+    </div>
   );
 }

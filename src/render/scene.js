@@ -391,6 +391,9 @@ export function createSurfaceScene(
   // 16x play: p95 36 ms with a fixed 2048² vs 33 ms at 1024²; the still view always
   // returns to the full map MOTION_LINGER_MS after the Sun stops.
   const OFF_MOTION_TEXEL_PX = 4;
+  // Surface view while the Sun moves: 2048² (redrawing 4096² every eased frame
+  // measured p95 33 ms at DPR 2); the full map returns when it settles.
+  const SURFACE_MOTION_SHADOW = 2048;
   function motionSize() {
     const mPerPx = (camera.top - camera.bottom) / (camera.zoom * Math.max(1, buffer.y));
     const cellPx = preset().ascii ? ascii.cellPx : 2 * OFF_MOTION_TEXEL_PX; // texel <= cell / 2
@@ -413,12 +416,13 @@ export function createSurfaceScene(
    * sim's whole hour. Pass `{ final: true }` for the settled frame: its shadows are
    * always redrawn. */
   function setSkySmooth(sample, { final = false } = {}) {
-    if (!final && view === 'map') {
+    if (!final) {
       // Moving: lighter shadow map. A final (settled or snapped) frame does not
       // count as motion, so a still view keeps, or returns to, the full map.
-      // (The surface view keeps the full map: its perspective shows shadow detail up close.)
+      // The surface view's perspective shows shadows up close, so it keeps more
+      // detail while moving (SURFACE_MOTION_SHADOW) instead of the cell-sized map.
       motionUntil = performance.now() + MOTION_LINGER_MS;
-      applyShadowMap(motionSize());
+      applyShadowMap(view === 'surface' ? Math.min(SURFACE_MOTION_SHADOW, stillShadowMap()) : motionSize());
     }
     const stride = shadowStride.update(frameMsAvg, refresh.intervalMs);
     const redraw = final || ++sinceShadow >= stride;
@@ -455,9 +459,10 @@ export function createSurfaceScene(
     rover.scale.setScalar(view === 'surface' ? 0.4 : 1);
     if (view === 'surface' && lastView !== 'surface') { yaw = roverHeading; pitch = DEFAULT_PITCH; } // start looking where the rover points
     if (view !== lastView) {
-      motionUntil = -Infinity; // the surface view wants the full shadow map at once
+      motionUntil = -Infinity; // a new view starts with the full shadow map
       applyShadowMap(stillShadowMap());
       requestShadowUpdate();
+      fence.reset(); // a countdown never carries over between views
     }
     lastView = view;
     applyExposure();

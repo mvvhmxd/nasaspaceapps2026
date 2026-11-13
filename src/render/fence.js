@@ -77,6 +77,12 @@ export function createFence({
       if (state === 'returning') state = 'inside'; // next tick re-checks, new countdown if still outside
     },
 
+    /** Forget any countdown or glide (e.g. the view changed): back to inside. The
+     * next tick starts a fresh 5 s countdown if the view is still outside. */
+    reset() {
+      state = 'inside';
+    },
+
     /** Drag / zoom started (true) or ended (false). Starting also stops a glide. */
     setHeld(on) {
       held = !!on;
