@@ -12,7 +12,7 @@ const ROWS = [
 ];
 const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
 
-export default function Planner({ mission, sites, site, statsBySite, day, minDay, pinned, slip, countdown, onSite, onDay, onPin, onUnpin, onLand, onBack }) {
+export default function Planner({ mission, sites, site, statsBySite, day, minDay, pinned, slip, countdown, onSite, onDay, onPin, onUnpin, onLand, landLabel = 'Land', onBack }) {
   const stats = statsBySite[site.id];
   const s = stats[day];
   const days = mission.config.missionHours / 24;
@@ -96,7 +96,7 @@ export default function Planner({ mission, sites, site, statsBySite, day, minDay
       </div>
       <div className="row">
         {countdown === null && <button onClick={onBack}>Back</button>}
-        <button className="primary" onClick={onLand}>Land at {siteName(site.id)}, day {day + 1}</button>
+        <button className="primary" onClick={onLand}>{landLabel}: {siteName(site.id)}, day {day + 1}</button>
       </div>
     </div>
   );

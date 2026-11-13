@@ -21,11 +21,13 @@ export const MISSIONS = [
     teaches: 'Earth contact',
     siteIds: ['site-a', 'site-b'],
     config: { ...SIM_CONFIG },
+    schedule: true,
     slipDays: 0,
     brief: [
       'A 14-day science mission. Drilling collects data in sunlight, but data only scores once it reaches Earth.',
       'Earth must be above the local horizon to transmit. It rises and sets on its own rhythm, not the Sun’s.',
       'Two sites this time. Compare them: the sunniest site is not always the one that can call home.',
+      'New: the task schedule. After picking a site and day you can plan when to drill, transmit and sleep, and see the battery forecast before you commit.',
     ],
   },
   {
@@ -34,6 +36,7 @@ export const MISSIONS = [
     teaches: 'Launch slip',
     siteIds: ['site-a', 'site-b', 'site-c'],
     config: { ...SIM_CONFIG },
+    schedule: true,
     slipDays: 5,
     replanSeconds: 60,
     brief: [

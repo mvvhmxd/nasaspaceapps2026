@@ -8,6 +8,8 @@ import { loadProgress, saveProgress, recordStars, nextMissionId, isUnlocked } fr
 import { dayStats, slipDay, starsFor, bestPlan, utcLabel } from './ui/gameHelpers.js';
 import { Title, MissionSelect, Brief, Help, Credits, Debrief, SkyBadge } from './ui/Screens.jsx';
 import Planner from './ui/Planner.jsx';
+import Schedule from './ui/Schedule.jsx';
+import { emptySchedule, planFrom } from './game/schedule.js';
 import MissionHud, { MissionStatus } from './ui/MissionHud.jsx';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
@@ -24,7 +26,7 @@ export default function App() {
   const eventsRef = useRef([]);
   const [sites, setSites] = useState(null); // { id: site }
   const [error, setError] = useState(null);
-  const [screen, setScreen] = useState('title'); // title | missions | brief | planner | surface | debrief
+  const [screen, setScreen] = useState('title'); // title | missions | brief | planner | schedule | surface | debrief
   const [overlay, setOverlay] = useState(null); // 'help' | 'credits' | null
   const [progress, setProgress] = useState(loadProgress);
   const [missionId, setMissionId] = useState(MISSIONS[0].id);
@@ -32,6 +34,8 @@ export default function App() {
   const [day, setDay] = useState(0);
   const [minDay, setMinDay] = useState(0);
   const [pinned, setPinned] = useState([]);
+  const [schedule, setSchedule] = useState(() => emptySchedule(MISSIONS[0].config.missionHours));
+  const planRef = useRef(null);
   const [slip, setSlip] = useState(0); // days of launch slip applied (0 = none yet)
   const [slipDone, setSlipDone] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -95,6 +99,7 @@ export default function App() {
     setDay(0);
     setMinDay(0);
     setPinned([]);
+    setSchedule(emptySchedule(missionById(id).config.missionHours));
     setSlip(0);
     setSlipDone(false);
     setCountdown(null);
@@ -111,6 +116,7 @@ export default function App() {
 
   function startMission(landingDay) {
     const s = initialState(cfg, landingDay * 24);
+    planRef.current = mission.schedule ? planFrom(schedule, landingDay * 24) : undefined;
     simRef.current = s;
     eventsRef.current = [];
     setSim(s);
@@ -130,6 +136,7 @@ export default function App() {
         setMinDay(slipped);
         setDay(slipped);
         setCountdown(REPLAN_OVERRIDE ?? mission.replanSeconds);
+        setScreen('planner');
         return; // back to the planner with the clock running
       }
     }
@@ -148,17 +155,17 @@ export default function App() {
 
   // Replan countdown after a launch slip. Paused while an overlay is open.
   useEffect(() => {
-    if (screen !== 'planner' || countdown === null || overlay) return;
+    if ((screen !== 'planner' && screen !== 'schedule') || countdown === null || overlay) return;
     if (countdown <= 0) { startMission(day); return; }
     const id = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(id);
-  }, [screen, countdown, overlay, day]);
+  }, [screen, countdown, overlay, day, schedule]);
 
   // Survival clock: every tick advances `speed` hours, one hour at a time inside advance().
   useEffect(() => {
     if (screen !== 'surface' || !playing || overlay || !site) return;
     const id = setInterval(() => {
-      const r = advance(site, simRef.current, speed, forceSleep ? sleepPlan : undefined);
+      const r = advance(site, simRef.current, speed, forceSleep ? sleepPlan : planRef.current);
       simRef.current = r.state;
       setSim(r.state);
       if (r.events.length) {
@@ -211,7 +218,7 @@ export default function App() {
       {!sites && <div className="msg">Loading landing sites&hellip;</div>}
       {site && sky && (
         <>
-          {(screen === 'planner' || screen === 'surface') && (
+          {(screen === 'planner' || screen === 'schedule' || screen === 'surface') && (
             <div className="stack-left">
               <div className="hud static">
                 <div className="title">{site.name}</div>
@@ -255,8 +262,15 @@ export default function App() {
               onSite={setSiteId} onDay={setDay}
               onPin={(p) => setPinned((list) => (list.some((x) => samePin(x, p)) || list.length >= 3 ? list : [...list, p]))}
               onUnpin={(p) => setPinned((list) => list.filter((x) => !samePin(x, p)))}
-              onLand={land}
+              onLand={mission.schedule ? () => setScreen('schedule') : land}
+              landLabel={mission.schedule ? 'Schedule tasks' : 'Land'}
               onBack={() => setScreen('brief')}
+            />
+          )}
+          {screen === 'schedule' && (
+            <Schedule
+              mission={mission} site={site} day={day} schedule={schedule} slip={slip} countdown={countdown}
+              onChange={setSchedule} onLand={land} onBack={() => setScreen('planner')}
             />
           )}
           {screen === 'surface' && sim && (
