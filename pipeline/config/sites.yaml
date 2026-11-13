@@ -1,21 +1,30 @@
-# Candidate sites. Coordinates MUST be cited (source field). Dev 1 picks the final 3.
-sites:
-  - id: site-a
-    name: TODO
-    lat_deg: null
-    lon_deg: null
-    source: TODO
-  - id: site-b
-    name: TODO
-    lat_deg: null
-    lon_deg: null
-    source: TODO
-  - id: site-c
-    name: TODO
-    lat_deg: null
-    lon_deg: null
-    source: TODO
+# Sites the pipeline builds. Coordinates: planetocentric degrees, east-positive, Moon mean-Earth/polar-axis frame.
+# These points were chosen by this team's own search of the LOLA terrain for local high points
+# (scripts/candidates.py). They are NOT official, selected or proposed landing sites.
+# Dev 1: replace with the final 3 sites and a citation for each.
 window:
-  start_utc: TODO
+  start_utc: "2026-12-01T00:00:00Z"
   hours: 1440
   step_hours: 1
+sites:
+  - id: ridge
+    name: "Connecting ridge"
+    blurb: "The highest point within 2 degrees of the pole, about 1.95 km above the reference sphere. Wide open horizon."
+    lat_deg: -89.449
+    lon_deg: 222.38
+  - id: spur
+    name: "Polar spur"
+    blurb: "A rise 14 km from the pole, beside a crater nearly 4 km deep. Long views toward Earth."
+    lat_deg: -89.548
+    lon_deg: 81.35
+  - id: knoll
+    name: "Near-side knoll"
+    blurb: "A low knoll on the Earth-facing side, 41 km from the pole. Ordinary ground, not a peak."
+    lat_deg: -88.651
+    lon_deg: 19.92
+  - id: hollow
+    name: "Low rise"
+    blurb: "A small rise among higher terrain, 31 km from the pole. Ridges up to 5 degrees high surround it."
+    lat_deg: -88.979
+    lon_deg: 158.12
+source: "Team search of LOLA LDEM_85S_40M for local high points; not an official landing site."

@@ -17,6 +17,7 @@ const TICK_MS = 500;
 const ALL_SITE_IDS = [...new Set(MISSIONS.flatMap((m) => m.siteIds))];
 const sleepPlan = () => MODES.ASLEEP;
 const params = new URLSearchParams(location.search);
+const DEBUG = params.has('debug'); // ?debug shows fps and the render-vs-sim shadow check
 const REPLAN_OVERRIDE = Number(params.get('replan')) || null; // ?replan=5 shortens the slip countdown for demos
 
 export default function App() {
@@ -234,14 +235,14 @@ export default function App() {
             </div>
           )}
           <div className="hud top-right">
-            <div>{fps} fps</div>
+            {DEBUG && <div>{fps} fps</div>}
             <div>
               <button className={ascii.on ? 'on' : ''} aria-pressed={ascii.on} onClick={() => sceneRef.current?.setAscii(!ascii.on)}>
                 ASCII {ascii.on ? 'on' : 'off'} (A)
               </button>
               {ascii.reason === 'auto' && !ascii.on && <div className="dark">switched off: low fps</div>}
             </div>
-            <div>
+            <div hidden={!DEBUG}>
               render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}
             </div>

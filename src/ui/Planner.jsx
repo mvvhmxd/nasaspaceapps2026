@@ -20,7 +20,7 @@ export default function Planner({ mission, sites, site, statsBySite, day, minDay
   const best = bestPerRow(pinStats);
   const here = { siteId: site.id, day };
   const isPinned = pinned.some((p) => samePin(p, here));
-  const siteName = (id) => sites.find((x) => x.id === id).name.replace('Training site ', '');
+  const siteName = (id) => sites.find((x) => x.id === id).name;
   return (
     <div className="panel planner" role="dialog" aria-label="Landing planner">
       <div className="kicker">Plan &middot; {mission.name}</div>
@@ -34,7 +34,7 @@ export default function Planner({ mission, sites, site, statsBySite, day, minDay
         <div className="tabs" role="tablist" aria-label="Landing site">
           {sites.map((x) => (
             <button key={x.id} role="tab" aria-selected={x.id === site.id} className={x.id === site.id ? 'on' : ''} onClick={() => onSite(x.id)}>
-              {x.name.replace('Training site ', '')}
+              {x.name}
             </button>
           ))}
         </div>

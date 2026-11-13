@@ -1,7 +1,7 @@
 {
-  "id": "site-a",
-  "lat": -89.5,
-  "lon": 0.0,
+  "id": "hollow",
+  "lat": -88.979,
+  "lon": 158.12,
   "startUtc": "2026-12-01T00:00:00Z",
   "hours": 1440,
   "toleranceDeg": 0.02,
@@ -26,20 +26,20 @@
     "quantities": 4,
     "apparent": "AIRLESS"
   },
-  "checkedUtc": "2026-11-13T17:35Z",
+  "checkedUtc": "2026-11-13T18:41Z",
   "bodies": {
     "sun": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 512,
+      "worstHour": 842,
       "pass": true
     },
     "earth": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 661,
+      "worstHour": 426,
       "pass": true
     }
   },

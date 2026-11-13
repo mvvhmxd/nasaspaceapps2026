@@ -1,7 +1,7 @@
 {
-  "id": "site-c",
-  "lat": -89.0,
-  "lon": 200.0,
+  "id": "spur",
+  "lat": -89.548,
+  "lon": 81.35,
   "startUtc": "2026-12-01T00:00:00Z",
   "hours": 1440,
   "toleranceDeg": 0.02,
@@ -26,20 +26,20 @@
     "quantities": 4,
     "apparent": "AIRLESS"
   },
-  "checkedUtc": "2026-11-13T17:35Z",
+  "checkedUtc": "2026-11-13T18:41Z",
   "bodies": {
     "sun": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 561,
+      "worstHour": 1438,
       "pass": true
     },
     "earth": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 689,
+      "worstHour": 990,
       "pass": true
     }
   },

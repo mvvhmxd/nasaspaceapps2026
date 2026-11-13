@@ -14,3 +14,9 @@
 - SPICE (DE440) Sun/Earth az/el matches JPL Horizons to 0.00007 deg at two test points (`pipeline/validation/`).
 - Blocking the first real site file: (a) Dev 1's 3 site coordinates with citations and the start date; (b) LOLA terrain download source (Moon Trek / PDS product ID and URL) for the horizon mask; (c) site JSON needs provenance fields (`schemaVersion`, `maskSource`, kernel list, validation result).
 - Frame note: site coordinates are read as planetocentric, east-positive, in the Moon mean-Earth/polar-axis frame (`MOON_ME`), the same convention as LOLA products.
+
+## 2026-11-13 (later): terrain is real too
+- All seven stages run. `public/sites/ridge.json`, `spur.json`, `knoll.json`, `hollow.json` are real LOLA terrain + real horizon + SPICE sky validated against Horizons, with `illustrative: false`.
+- **Dev 1 decides:** (a) keep these four sites or replace them (they are our own picks from `scripts/candidates.py`, window 60 days from 2026-12-01); (b) accept the new site JSON fields `schemaVersion`, `maskSource`, `blurb`, `terrain`, `sky` and document them in `docs/ARCHITECTURE.md`; (c) whether to model the Sun's 0.5 deg disc as partial light.
+- **Dev 2:** the on-map 3D shadows only know the 10 km crop, so they can disagree with the sim when a ridge farther away blocks the Sun. The sim's SUNLIT / IN SHADOW is authoritative. The render check moved behind `?debug`.
+- `public/sites/demo.json` is still used by `tests/visibility.test.js` but no mission uses it.

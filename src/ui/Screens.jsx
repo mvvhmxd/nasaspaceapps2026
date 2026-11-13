@@ -13,8 +13,9 @@ export function Stars({ n }) {
 export function SkyBadge({ site }) {
   return (
     <>
-      {site.sky?.real && <div className="badge teal">Sky: real &middot; SPICE DE440 &#10003; Horizons</div>}
-      {site.illustrative && <div className="badge">Terrain: illustrative</div>}
+      {site.terrain?.real && <div className="badge teal">Terrain: NASA LOLA</div>}
+      {site.sky?.real && <div className="badge teal">Sky: SPICE DE440 &#10003; Horizons</div>}
+      {site.illustrative && <div className="badge">Illustrative</div>}
     </>
   );
 }
@@ -24,8 +25,8 @@ export function Title({ onStart, onHelp, onCredits }) {
     <div className="panel center" role="dialog" aria-label="Title">
       <h1>CRATER EXPECTATIONS</h1>
       <p className="tag">Plan a landing at the Moon&rsquo;s south pole. Then live with it.</p>
-      <div className="badge teal">Sun and Earth positions: SPICE DE440, checked against JPL Horizons</div>{' '}
-      <div className="badge">Terrain: illustrative, not yet LOLA</div>
+      <div className="badge teal">Terrain and horizons: NASA LOLA</div>{' '}
+      <div className="badge teal">Sun and Earth: SPICE DE440, checked against JPL Horizons</div>
       <div className="row">
         <button className="primary" onClick={onStart} autoFocus>Play</button>
         <button onClick={onHelp}>How it works</button>
@@ -87,7 +88,8 @@ export function Help({ onClose }) {
       <h2>How it works</h2>
       <p><b>Horizon.</b> For each of 360 compass directions the game knows how high the terrain rises as seen from the lander. The Sun or Earth is visible only when its elevation is above the terrain in its direction.</p>
       <p><b>Sky.</b> Hourly Sun and Earth directions are computed with NASA&rsquo;s SPICE toolkit and the DE440 ephemeris for each site&rsquo;s coordinates, then checked against JPL Horizons. The game never moves them for drama.</p>
-      <p><b>Terrain.</b> The terrain and its horizon are <b>illustrative</b> (procedural), not LOLA data yet. So when a ridge hides the Sun here, that timing is not a prediction for the real Moon.</p>
+      <p><b>Terrain.</b> The map and the horizon come from NASA&rsquo;s LOLA laser-altimeter elevation model of the south pole. The horizon looks out to 250 km, because a distant ridge can hide a Sun that is only 1&deg; up.</p>
+      <p><b>Simplifications.</b> The Sun counts as up when its centre clears the horizon (the real disc is about 0.5&deg; wide, so real sunrise is gradual). The lander&rsquo;s eye is 2 m above a 40 m terrain grid, so boulders and small bumps are not modelled. The 3D shadows drawn on the map use only the 10 km around the site and are a visual aid; the SUNLIT / IN SHADOW status is the calculated truth.</p>
       <p><b>Power.</b> Battery numbers are <b>game values</b>, balanced for play, not taken from a real lander. Sunlit hours charge; every hour drains; sleeping drains least.</p>
       <p><b>Science.</b> Drilling fills the data store in sunlight. Data scores only when transmitted with Earth in view. Transmitting in the dark costs battery you cannot get back until sunrise: use Force sleep.</p>
       <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
@@ -112,8 +114,8 @@ export function Credits({ sites, onClose }) {
           ))}
         </tbody>
       </table>
-      <p className="dim small">Checked {sites[0]?.sky?.validation?.checkedUtc} against the JPL Horizons API, tolerance {sites[0]?.sky?.validation?.toleranceDeg}&deg;. Site coordinates are test points, not selected landing sites.</p>
-      <p><b>Terrain (illustrative).</b> Procedural heightmaps made for this game. Not LOLA data.</p>
+      <p className="dim small">Checked {sites[0]?.sky?.validation?.checkedUtc} against the JPL Horizons API, tolerance {sites[0]?.sky?.validation?.toleranceDeg}&deg;. The sites are high points this team found by searching the LOLA terrain. They are not official or proposed landing sites.</p>
+      <p><b>Terrain and horizons (real).</b> NASA LOLA gridded elevation, PDS data set {sites[0]?.terrain?.dataSet}, product version {sites[0]?.terrain?.productVersion}: {sites[0]?.terrain?.horizonProducts?.join(' and ')}. Frame: {sites[0]?.terrain?.frame?.toLowerCase()}. Resampled to a local east/north grid; horizon computed out to {sites[0]?.terrain?.horizonRangeKm} km for an observer {sites[0]?.terrain?.eyeHeightM} m above the surface.</p>
       <p><b>Challenge resources.</b> JPL Horizons, LROC QuickMap, NASA Moon Trek, Canadian Space Agency Moon exploration pages.</p>
       <p><b>Built with.</b> React, three.js, Vite, SpiceyPy. AI coding assistance was used during development; see the team&rsquo;s AI use log.</p>
       <p className="dim small">Made for the NASA Space Apps Challenge 2026. Not affiliated with or endorsed by NASA.</p>

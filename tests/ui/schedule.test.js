@@ -5,7 +5,7 @@ import { SIM_CONFIG } from '../../src/sim/config.js';
 import { initialState, advance, MODES } from '../../src/sim/survival.js';
 import { BLOCK_H, emptySchedule, planFrom, blockSky, isWasted, forecast } from '../../src/game/schedule.js';
 
-const site = decodeSite(JSON.parse(readFileSync('public/sites/site-b.json', 'utf8')));
+const site = decodeSite(JSON.parse(readFileSync('public/sites/spur.json', 'utf8')));
 const H = SIM_CONFIG.missionHours;
 
 describe('task schedule', () => {
@@ -66,7 +66,7 @@ describe('task schedule', () => {
   });
 
   it('a schedule can save a mission the automatic plan loses', () => {
-    const c = decodeSite(JSON.parse(readFileSync('public/sites/site-c.json', 'utf8')));
+    const c = decodeSite(JSON.parse(readFileSync('public/sites/hollow.json', 'utf8')));
     let saved = 0;
     for (let day = 0; day * 24 + H <= c.hours; day++) {
       const auto = forecast(c, SIM_CONFIG, day * 24, emptySchedule(H));

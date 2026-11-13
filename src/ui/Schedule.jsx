@@ -31,7 +31,7 @@ export default function Schedule({ mission, site, day, schedule, slip, countdown
 
   return (
     <div className="panel planner" role="dialog" aria-label="Task schedule">
-      <div className="kicker">Schedule &middot; {mission.name} &middot; {site.name.replace('Training site ', '')}, day {day + 1}</div>
+      <div className="kicker">Schedule &middot; {mission.name} &middot; {site.name}, day {day + 1}</div>
       {slip > 0 && countdown !== null && (
         <div className="alert" role="alert">&#9888; LAUNCH SLIP: +{slip} days. Landing in <b>{countdown} s</b> with this schedule.</div>
       )}

@@ -68,12 +68,15 @@ describe('gameHelpers', () => {
 const load = (id) => decodeSite(JSON.parse(readFileSync(`public/sites/${id}.json`, 'utf8')));
 
 describe('campaign', () => {
-  it('every mission site exists, has a full launch window and a validated real sky', () => {
+  it('every mission site exists, has a full launch window, real terrain and a validated real sky', () => {
     for (const m of MISSIONS) {
       for (const id of m.siteIds) {
         const s = load(id);
         expect(validStartDays(s, m.config.missionHours)).toBeGreaterThanOrEqual(10);
-        expect(s.illustrative).toBe(true); // terrain is still procedural
+        expect(s.illustrative).toBe(false);
+        expect(s.terrain.real).toBe(true);
+        expect(s.maskSource).toBe('lola-wide');
+        expect(s.horizonMask).toHaveLength(360);
         expect(s.sky.real).toBe(true);
         expect(s.sky.validation.sunMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);
         expect(s.sky.validation.earthMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);

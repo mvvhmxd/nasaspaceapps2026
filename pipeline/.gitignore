@@ -8,3 +8,4 @@ data/ephemeris/
 *.tls
 *.bpc
 *.tf
+data/derived/
