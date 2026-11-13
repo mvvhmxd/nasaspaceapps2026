@@ -1,0 +1,21 @@
+# Candidate sites. Coordinates MUST be cited (source field). Dev 1 picks the final 3.
+sites:
+  - id: site-a
+    name: TODO
+    lat_deg: null
+    lon_deg: null
+    source: TODO
+  - id: site-b
+    name: TODO
+    lat_deg: null
+    lon_deg: null
+    source: TODO
+  - id: site-c
+    name: TODO
+    lat_deg: null
+    lon_deg: null
+    source: TODO
+window:
+  start_utc: TODO
+  hours: 1440
+  step_hours: 1
