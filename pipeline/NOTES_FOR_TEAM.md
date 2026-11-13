@@ -9,3 +9,8 @@
 | 5 | Mission window dates | Dev 1 | open |
 | 6 | Playback 4×/16× must call `advance(site, state, N)` (now in `src/sim/survival.js`) | Dev 2 | ready to use |
 | 7 | GDD says positions come *from* Horizons; change to "SPICE computes, Horizons verifies" | Dev 1 | open |
+
+## 2026-11-13: ephemeris is real and validated
+- SPICE (DE440) Sun/Earth az/el matches JPL Horizons to 0.00007 deg at two test points (`pipeline/validation/`).
+- Blocking the first real site file: (a) Dev 1's 3 site coordinates with citations and the start date; (b) LOLA terrain download source (Moon Trek / PDS product ID and URL) for the horizon mask; (c) site JSON needs provenance fields (`schemaVersion`, `maskSource`, kernel list, validation result).
+- Frame note: site coordinates are read as planetocentric, east-positive, in the Moon mean-Earth/polar-axis frame (`MOON_ME`), the same convention as LOLA products.
