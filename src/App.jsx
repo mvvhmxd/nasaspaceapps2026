@@ -166,6 +166,10 @@ export default function App() {
     planRef.current = mission.schedule ? planFrom(schedule, landingDay * 24) : undefined;
     simRef.current = s;
     roverRef.current = initialRover();
+    if (DEBUG && params.get('rover')) { // ?debug&rover=x,z starts the rover somewhere else (testing)
+      const [x, z] = params.get('rover').split(',').map(Number);
+      roverRef.current = { ...roverRef.current, x, z, docked: false };
+    }
     setRover(roverRef.current);
     setView('map');
     keysRef.current.clear();
