@@ -1,5 +1,6 @@
 // Surface view: lit terrain, a low Sun casting real shadows, the lander, and
-// the coloured ASCII pass (toggle with `A`; falls back to plain shading below 30 fps).
+// the coloured ASCII pass. Quality presets (High / Balanced / Performance / Off) come
+// from quality.js; `A` toggles Off and back; below 30 fps it steps down one preset.
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -9,13 +10,23 @@ import { buildTerrain, landerEye, blockedToward } from './terrain.js';
 import { directionFromAzEl } from './sun.js';
 import { createTopDownCamera, fitTopDown } from './camera.js';
 import { createAsciiPass } from './ascii.js';
+import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
-const FPS_FLOOR = 30; // three readings below this switch the ASCII pass off
+const FPS_FLOOR = 30; // three readings below this step the quality down one preset
 
-export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss = 10 } = {}) {
+/**
+ * `quality`: preset name (see quality.js). `cellCss`: optional debug override of the
+ * preset's cell size (`?cell=8`). `onAsciiChange({ on, reason, quality, ramp })` fires
+ * on every quality change; reason is 'user' or 'auto' (low fps).
+ */
+export function createSurfaceScene(
+  canvas, site, { onFps, onAsciiChange, quality: startQuality = DEFAULT_QUALITY, cellCss } = {},
+) {
+  let quality = isQuality(startQuality) ? startQuality : DEFAULT_QUALITY;
+  const preset = () => QUALITY_PRESETS[quality];
   const hm = site.heightmap;
   const extentM = (hm.size - 1) * hm.spacingM;
 
@@ -33,7 +44,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
 
   const sun = new THREE.DirectionalLight(0xffe2b0, 3.4);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.setScalar(preset().shadowMap);
   const sc = sun.shadow.camera;
   const r = extentM * 0.75;
   sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r;
@@ -75,21 +86,43 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   // ASCII chain: scene -> glyph pass -> output (tone mapping + sRGB once).
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const ascii = createAsciiPass({ cellCss, pixelRatio });
+  const ascii = createAsciiPass({ cellCss: cellCss || preset().cellCss, pixelRatio, glyphs: preset().glyphs });
   composer.addPass(ascii.pass);
   composer.addPass(new OutputPass());
 
-  let asciiOn = true;
-  let autoOff = false;
+  let lastAsciiQuality = preset().ascii ? quality : DEFAULT_QUALITY; // where `A` returns to
+  let lastReason = 'user';
   let lowFpsStreak = 0;
+
+  function applyShadowMap(size) {
+    if (sun.shadow.mapSize.x === size) return;
+    sun.shadow.mapSize.setScalar(size);
+    sun.shadow.map?.dispose(); // three.js rebuilds it at the new size next frame
+    sun.shadow.map = null;
+  }
+
+  function setQuality(name, reason = 'user') {
+    if (!isQuality(name) || name === quality) return;
+    quality = name;
+    lastReason = reason;
+    lowFpsStreak = 0;
+    const p = preset();
+    if (p.ascii) {
+      lastAsciiQuality = name;
+      ascii.setCell(cellCss || p.cellCss, pixelRatio, p.glyphs);
+    }
+    applyShadowMap(p.shadowMap);
+    onAsciiChange?.({ on: p.ascii, reason, quality, ramp: ascii.ramp });
+  }
+
   function setAscii(on, reason = 'user') {
-    if (asciiOn === on) return;
-    asciiOn = on;
-    autoOff = !on && reason === 'auto';
-    onAsciiChange?.({ on, reason, ramp: ascii.ramp });
+    if (preset().ascii === on) return;
+    setQuality(on ? lastAsciiQuality : 'off', reason);
   }
   function onKey(e) {
-    if (e.key === 'a' || e.key === 'A') setAscii(!asciiOn);
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target?.closest?.('input, select, textarea')) return;
+    if (e.key === 'a' || e.key === 'A') setAscii(!preset().ascii);
   }
   window.addEventListener('keydown', onKey);
 
@@ -122,7 +155,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   resize();
 
   function draw() {
-    if (asciiOn) {
+    if (preset().ascii) {
       camera.layers.set(0); // terrain only through the glyph pass
       composer.render();
       camera.layers.set(SHARP_LAYER); // lander drawn crisp on top
@@ -148,9 +181,10 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
       onFps?.(fps);
       frames = 0;
       last = now;
-      if (asciiOn && !document.hidden) {
+      if (preset().ascii && !document.hidden) {
         lowFpsStreak = fps < FPS_FLOOR ? lowFpsStreak + 1 : 0;
-        if (lowFpsStreak >= 3) setAscii(false, 'auto');
+        // Shed cell detail before giving up the ASCII look (spec 8.1).
+        if (lowFpsStreak >= 3) setQuality(lowerQuality(quality), 'auto');
       }
     }
   });
@@ -159,10 +193,12 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
     setSun,
     setLanderInShadow,
     setAscii: (on) => setAscii(on),
+    setQuality: (name) => setQuality(name),
     setCell: (css) => ascii.setCell(css, pixelRatio),
-    get asciiOn() { return asciiOn; },
-    get autoOff() { return autoOff; },
-    ramp: ascii.ramp,
+    get quality() { return quality; },
+    get asciiOn() { return preset().ascii; },
+    get autoOff() { return quality === 'off' && lastReason === 'auto'; },
+    get ramp() { return ascii.ramp; },
     dispose() {
       renderer.setAnimationLoop(null);
       window.removeEventListener('keydown', onKey);

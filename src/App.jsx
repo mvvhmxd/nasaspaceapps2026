@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { loadSite } from './data/loadSite.js';
 import { stateAt } from './sim/visibility.js';
 import { createSurfaceScene } from './render/scene.js';
+import { initialQuality, saveQuality } from './render/quality.js';
+import AsciiQuality from './ui/AsciiQuality.jsx';
+
+function safeStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
 
@@ -16,7 +22,10 @@ export default function App() {
   const [speed, setSpeed] = useState(1);
   const [fps, setFps] = useState(0);
   const [renderBlocked, setRenderBlocked] = useState(null);
-  const [ascii, setAsciiState] = useState({ on: true, reason: 'user' });
+  const [ascii, setAsciiState] = useState(() => {
+    const quality = initialQuality(location.search, safeStorage());
+    return { on: quality !== 'off', reason: 'user', quality };
+  });
 
   useEffect(() => {
     loadSite('demo').then(setSite, (e) => setError(String(e)));
@@ -27,10 +36,13 @@ export default function App() {
     const params = new URLSearchParams(location.search);
     const s = createSurfaceScene(canvasRef.current, site, {
       onFps: setFps,
-      onAsciiChange: setAsciiState,
-      cellCss: Number(params.get('cell')) || 10, // ?cell=8 for denser glyphs, 12 for bigger type
+      onAsciiChange: (a) => {
+        setAsciiState(a);
+        if (a.reason === 'user') saveQuality(a.quality, safeStorage()); // low-fps steps aren't saved
+      },
+      quality: ascii.quality, // ?quality=high|balanced|performance|off, ?ascii=0, or the saved choice
+      cellCss: Number(params.get('cell')) || undefined, // ?cell=8 overrides the preset's cell size
     });
-    if (params.get('ascii') === '0') s.setAscii(false);
     sceneRef.current = s;
     return () => s.dispose();
   }, [site]);
@@ -77,12 +89,7 @@ export default function App() {
           </div>
           <div className="hud top-right">
             <div>{fps} fps</div>
-            <div>
-              <button className={ascii.on ? 'on' : ''} onClick={() => sceneRef.current?.setAscii(!ascii.on)}>
-                ASCII {ascii.on ? 'on' : 'off'} (A)
-              </button>
-              {ascii.reason === 'auto' && !ascii.on && <div className="dark">switched off: low fps</div>}
-            </div>
+            <AsciiQuality ascii={ascii} onChange={(q) => sceneRef.current?.setQuality(q)} />
             <div>
               render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees ✓</span> : <span className="dark">differs ✗</span>}
