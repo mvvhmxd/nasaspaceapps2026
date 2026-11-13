@@ -1,9 +1,22 @@
 ---
-description: Finish a work session — test, check scope, commit, push, draft PR
+description: Finish work. Test, build, check ownership and data, commit, push, open a draft PR.
 ---
-1. Run `npm test`. If the user is Dev 3, also run `pytest` in `pipeline/`. Stop and report on failure.
-2. `git diff --name-only main...` — warn about any changed file outside the user's area (see CLAUDE.md) and name its owner.
-3. Make sure no kernels, DEMs or `data/raw/` files are staged.
-4. Propose a conventional commit message and WAIT for the user's OK.
-5. Push the branch and open a DRAFT PR for Dev 1 to review, listing changed files and decisions the reviewer must make.
-6. Add a one-line entry to `pipeline/AI_USE_LOG.md`.
+Stop if a step fails. Never commit, push or open a PR without the user's OK.
+1. **Role.** If unknown, ask (dev1–dev4).
+2. **Checks.** `npm test` and `npm run build` for everyone. dev3 also runs pytest in `pipeline/` with
+   `pipeline/.venv`. If UI or the map changed: run the app and check the changed flow in a browser
+   (`qa-playtest` skill). Never skip or disable a test.
+3. **Ownership.** Compare `git status` and `git diff --name-only main...HEAD` with `CLAUDE.md`.
+   Files from another role: warn and name the owner. Shared files: needs owner + dev1, goes under
+   "Reviewer must decide".
+4. **Data and assets.** Refuse kernels, DEMs, `data/raw/`, `.venv/`, `node_modules/`. Any new asset
+   must be listed with its license in `docs/ASSETS_AND_LICENSES.md` and the credits file.
+5. **Docs.** If a milestone item changed, update `docs/BUILD_STATUS.md` (commands run, results,
+   next task). Record architecture choices in `docs/DECISIONS.md`.
+6. **AI-use log.** Add one line (`date – tool – what it did – what you reviewed`) to the right log.
+   The user confirms the "reviewed" part.
+7. **Commit.** List files, stage them by name (never `git add -A`), propose a conventional message.
+   Use the user's git identity, with no AI co-author lines. Wait for OK.
+8. **Push + draft PR.** `git push -u origin <branch>`. With `gh`: `gh pr create --draft`, reviewer =
+   owner (dev4) and dev1. Body: What / Files changed / Milestone / Reviewer must decide / Tests and
+   build / Browser check. Without `gh`: print the title, body and compare URL. Only dev1 or dev4 merge, and only with the user's OK.

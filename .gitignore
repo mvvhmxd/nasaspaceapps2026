@@ -1,5 +1,12 @@
 # Installed agent skills: restore with `npx skills experimental_install` (from skills-lock.json)
-.claude/skills/
+.claude/skills/*
+!.claude/skills/game-director/
+!.claude/skills/ascii-rendering/
+!.claude/skills/ui-polish/
+!.claude/skills/simulation-engine/
+!.claude/skills/nasa-data-integrity/
+!.claude/skills/qa-playtest/
+!.claude/skills/asset-license-audit/
 .claude/settings.local.json
 
 # Node / build
