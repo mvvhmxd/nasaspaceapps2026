@@ -6,8 +6,11 @@ import * as THREE from 'three';
 import { PALETTE } from '../theme.js';
 import { cellTargetLayout, cellTargetFrustum } from './cellGrid.js';
 import {
-  MAJOR_EVERY, MIN_MINOR_SPACING_CELLS, MIN_MAJOR_SPACING_CELLS, CROSSING_MARGIN_M,
+  MAJOR_EVERY, MIN_MINOR_SPACING_CELLS, MIN_MAJOR_SPACING_CELLS, NUDGE_M, MAX_CANDIDATES,
+  MAX_LEVELS_PER_CELL, CONTOUR_UNDER_GLYPH, MINOR_STROKE_PER_CELL, MAJOR_STROKE_PER_CELL,
 } from './contours.js';
+import { contourColor } from './contourStyle.js';
+import { ELEVATION_ALPHA_OFFSET } from './terrainMaterial.js';
 
 const CANDIDATES =
   " .`'^,:;\"-~_=+<>i!lI|/\\()1{}[]?rctvxzjfnuoasykehbdpqwmZXYUOLCJQ0#%&8WMB@$";
@@ -65,53 +68,6 @@ export function buildGlyphAtlas({ count = 32, cellPx = 8, font = FONT_STACK } = 
   return { texture, ramp: ramp.map((g) => g.ch).join(''), count };
 }
 
-/**
- * Contour glyph atlas: 8 cells of `cellPx` (CONTOUR_GLYPHS order - | / \, minor
- * then major). Drawn as strokes that run edge to edge (like box-drawing
- * characters), so neighbouring cells join into continuous contour lines.
- */
-export function buildLineAtlas(cellPx) {
-  const c = cellPx;
-  const canvas = document.createElement('canvas');
-  canvas.width = c * 8;
-  canvas.height = c;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = '#fff';
-  ctx.lineCap = 'square';
-  const widths = [Math.max(1, Math.round(c * 0.1)), Math.max(2, Math.round(c * 0.2))];
-  widths.forEach((lw, major) => {
-    ctx.lineWidth = lw;
-    const mid = lw % 2 ? Math.floor(c / 2) + 0.5 : Math.round(c / 2); // crisp on the pixel grid
-    const segs = [
-      [0, mid, c, mid], // -
-      [mid, 0, mid, c], // |
-      [0, c, c, 0], // /  (canvas y points down)
-      [0, 0, c, c], // backslash
-    ];
-    segs.forEach(([x0, y0, x1, y1], g) => {
-      const ox = (major * 4 + g) * c;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(ox, 0, c, c);
-      ctx.clip();
-      ctx.beginPath();
-      ctx.moveTo(ox + x0, y0);
-      ctx.lineTo(ox + x1, y1);
-      ctx.stroke();
-      ctx.restore();
-    });
-  });
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.generateMipmaps = false;
-  texture.minFilter = THREE.NearestFilter;
-  texture.magFilter = THREE.NearestFilter;
-  texture.needsUpdate = true;
-  return texture;
-}
-
 const glyphVertex = /* glsl */ `
   void main() {
     gl_Position = vec4(position.xy, 0.0, 1.0); // full-screen quad, no camera
@@ -119,7 +75,7 @@ const glyphVertex = /* glsl */ `
 `;
 
 const glyphFragment = /* glsl */ `
-  uniform sampler2D tScene;   // cell-aligned terrain, alpha 0 = nothing drawn
+  uniform sampler2D tScene;   // corner-aligned terrain: rgb colour, alpha = 1 + elevation (0 = empty)
   uniform sampler2D tGlyph;
   uniform float glyphCount;
   uniform float cell;         // cell size in drawing-buffer pixels
@@ -133,50 +89,108 @@ const glyphFragment = /* glsl */ `
   uniform vec3 shadowColor;
   uniform vec3 sunColor;
   uniform vec3 emptyColor;
-  // Contours (see contours.js: contourGlyphForCell is the same rule in JS).
-  uniform sampler2D tLine;     // 8 glyphs: - | / backslash, minor then major
+  // Contours: cellContourInk mirrors cellContours() in contours.js.
   uniform float contourOn;
   uniform float minM;
   uniform float maxM;
   uniform float interval;
   uniform float majorEvery;
-  uniform float underGlyph;    // density glyph strength under a contour
-  uniform vec3 contourShadow;
-  uniform vec3 contourLit;
+  uniform float minorHalfWidth; // drawing-buffer pixels
+  uniform float majorHalfWidth;
+  uniform float underGlyph;
+  uniform vec3 minorShadow;
+  uniform vec3 majorShadow;
+  uniform vec3 minorLit;
+  uniform vec3 majorLit;
 
   const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-  const float TAN_22_5 = 0.41421356;
+  const float NUDGE = ${NUDGE_M.toFixed(4)};
+  const float MIN_MINOR_SPACING = ${MIN_MINOR_SPACING_CELLS.toFixed(4)};
+  const float MIN_MAJOR_SPACING = ${MIN_MAJOR_SPACING_CELLS.toFixed(4)};
+  const int MAX_CANDIDATES = ${MAX_CANDIDATES};
+  const int MAX_LEVELS = ${MAX_LEVELS_PER_CELL};
 
-  // Terrain alpha 0.5..1 encodes elevation between minM and maxM.
   float elevation(float a) {
-    return minM + (a - 0.5) * 2.0 * (maxM - minM);
+    return minM + (a - ${ELEVATION_ALPHA_OFFSET.toFixed(1)}) * (maxM - minM);
   }
 
-  // Contour glyph for a cell: -1 = none, else atlas index 0..7.
-  float contourGlyph(float eTL, float eTR, float eBL, float eBR) {
-    // Levels must be cleared by the margin on both sides (grazing = data noise).
-    float lo = min(min(eTL, eTR), min(eBL, eBR)) + ${CROSSING_MARGIN_M.toFixed(3)};
-    float hi = max(max(eTL, eTR), max(eBL, eBR)) - ${CROSSING_MARGIN_M.toFixed(3)};
-    float n = floor(hi / interval) - floor(lo / interval);
-    if (n < 0.5) return -1.0;
-    float majorStep = interval * majorEvery;
-    float nMajor = floor(hi / majorStep) - floor(lo / majorStep);
-    float gx = (eTR + eBR - eTL - eBL) * 0.5;   // metres per cell
-    float gy = (eTL + eTR - eBL - eBR) * 0.5;
-    float ax = abs(gx);
-    float ay = abs(gy);
-    // Spacing between neighbouring contours in cells; too close reads as hatching.
+  float nudged(float e, float level) {
+    return abs(e - level) < NUDGE ? level + NUDGE : e;
+  }
+
+  float segmentDistance(vec2 q, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    float h = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+    return length(q - a - ab * h);
+  }
+
+  // Distance (cell units) from q to the marching-squares segments of one level.
+  // c = corner elevations (bl, br, tl, tr). 1e9 when the level does not cross.
+  float levelDistance(vec4 c, float level, vec2 q) {
+    float bl = nudged(c.x, level);
+    float br = nudged(c.y, level);
+    float tl = nudged(c.z, level);
+    float tr = nudged(c.w, level);
+    bool uBL = bl >= level;
+    bool uBR = br >= level;
+    bool uTL = tl >= level;
+    bool uTR = tr >= level;
+    // Edge crossings, in the order bottom, right, top, left (as in levelSegments).
+    bool hB = uBL != uBR;
+    bool hR = uBR != uTR;
+    bool hT = uTL != uTR;
+    bool hL = uBL != uTL;
+    vec2 pB = vec2(hB ? (level - bl) / (br - bl) : 0.0, 0.0);
+    vec2 pR = vec2(1.0, hR ? (level - br) / (tr - br) : 0.0);
+    vec2 pT = vec2(hT ? (level - tl) / (tr - tl) : 0.0, 1.0);
+    vec2 pL = vec2(0.0, hL ? (level - bl) / (tl - bl) : 0.0);
+    int count = int(hB) + int(hR) + int(hT) + int(hL);
+    if (count == 2) {
+      vec2 a = vec2(0.0);
+      vec2 b = vec2(0.0);
+      bool got = false;
+      if (hB) { a = pB; got = true; }
+      if (hR) { if (got) { b = pR; } else { a = pR; got = true; } }
+      if (hT) { if (got) { b = pT; } else { a = pT; got = true; } }
+      if (hL) { b = pL; }
+      return segmentDistance(q, a, b);
+    }
+    if (count == 4) {
+      // Saddle: the cell-centre average decides which corners are cut off.
+      bool centreUp = (bl + br + tl + tr) * 0.25 >= level;
+      if (uBL != centreUp) return min(segmentDistance(q, pL, pB), segmentDistance(q, pR, pT));
+      return min(segmentDistance(q, pB, pR), segmentDistance(q, pT, pL));
+    }
+    return 1e9;
+  }
+
+  // Minor and index contour distances (cell units) for the cell at q, and how many levels drawn.
+  vec3 cellContourDistances(vec4 c, vec2 q) {
+    float lo = min(min(c.x, c.y), min(c.z, c.w));
+    float hi = max(max(c.x, c.y), max(c.z, c.w));
+    float gx = (c.w + c.y - c.z - c.x) * 0.5; // metres per cell
+    float gy = (c.z + c.w - c.x - c.y) * 0.5;
     float slope = length(vec2(gx, gy));
     float minorSpacing = slope > 0.0 ? interval / slope : 1e9;
-    bool showMajor = nMajor > 0.5 && minorSpacing * majorEvery >= ${MIN_MAJOR_SPACING_CELLS.toFixed(3)};
-    bool showMinor = n - nMajor > 0.5 && minorSpacing >= ${MIN_MINOR_SPACING_CELLS.toFixed(3)};
-    if (!showMajor && !showMinor) return -1.0;
-    float g;
-    if (ax <= ay * TAN_22_5) g = 0.0;        // -
-    else if (ay <= ax * TAN_22_5) g = 1.0;   // |
-    else g = gx * gy < 0.0 ? 2.0 : 3.0;      // / or backslash
-    if (ax + ay < 1e-9) g = (eTL + eBR >= eTR + eBL) ? 3.0 : 2.0; // saddle
-    return g + (showMajor ? 4.0 : 0.0);
+    bool minorOk = minorSpacing >= MIN_MINOR_SPACING;
+    bool majorOk = minorSpacing * majorEvery >= MIN_MAJOR_SPACING;
+    float first = ceil((lo + NUDGE) / interval);
+    float minorD = 1e9;
+    float majorD = 1e9;
+    int drawn = 0;
+    for (int k = 0; k < MAX_CANDIDATES; k++) {
+      if (drawn >= MAX_LEVELS) break;
+      float level = (first + float(k)) * interval;
+      if (level >= hi + NUDGE) break;
+      float m = level / (interval * majorEvery);
+      bool major = abs(m - floor(m + 0.5)) < 1e-4;
+      if (major ? !majorOk : !minorOk) continue;
+      float d = levelDistance(c, level, q);
+      if (d > 1e8) continue;
+      drawn++;
+      if (major) majorD = min(majorD, d); else minorD = min(minorD, d);
+    }
+    return vec3(minorD, majorD, float(drawn));
   }
 
   void main() {
@@ -189,7 +203,7 @@ const glyphFragment = /* glsl */ `
     vec4 tb = texelFetch(tScene, t0 + ivec2(1, 0), 0);
     vec4 tc = texelFetch(tScene, t0 + ivec2(0, 1), 0);
     vec4 td = texelFetch(tScene, t0 + ivec2(1, 1), 0);
-    vec4 hit = step(vec4(0.25), vec4(ta.a, tb.a, tc.a, td.a)); // terrain alpha >= 0.5, empty 0
+    vec4 hit = step(vec4(0.5), vec4(ta.a, tb.a, tc.a, td.a)); // terrain alpha >= 1, empty 0
     float hits = dot(hit, vec4(1.0));
 
     vec3 color = emptyColor; // beyond the terrain edge: plain navy, no glyph speckle
@@ -211,23 +225,21 @@ const glyphFragment = /* glsl */ `
       vec3 vivid = clamp(mix(grey, scene, saturation) * gain, 0.0, 1.0);
       vec3 grade = mix(shadowColor, sunColor, lum);
       vec3 tint = mix(vivid, grade * max(lum, 0.15), duotone);
-
       vec3 background = mix(scene, shadowColor * 0.6, duotone * 0.5) * fill;
 
-      // Contour lines: only where all four texels are terrain (no edge garbage).
-      // Corners: ta = bottom-left, tb = bottom-right, tc = top-left, td = top-right.
-      float g = -1.0;
+      // Contours: only where all four corners are terrain.
+      vec3 cd = vec3(1e9, 1e9, 0.0);
       if (contourOn > 0.5 && hits > 3.5) {
-        g = contourGlyph(elevation(tc.a), elevation(td.a), elevation(ta.a), elevation(tb.a));
+        vec4 c = vec4(elevation(ta.a), elevation(tb.a), elevation(tc.a), elevation(td.a));
+        cd = cellContourDistances(c, local);
       }
-      if (g >= 0.0) {
-        float lineInk = texture(tLine, vec2((g + local.x) / 8.0, local.y)).r;
-        float major = step(3.5, g);
-        // Minor contours stay quiet so the glyph texture leads; index contours stand out.
-        vec3 lineColor = mix(contourShadow, contourLit, smoothstep(0.15, 0.45, lum)) * mix(0.7, 1.5, major);
-        color = mix(mix(background, tint, ink * underGlyph), lineColor, lineInk);
-      } else {
-        color = mix(background, tint, ink);
+      color = mix(background, tint, ink * (cd.z > 0.5 ? underGlyph : 1.0));
+      if (cd.z > 0.5) {
+        float litMix = smoothstep(0.15, 0.45, lum);
+        float minorInk = clamp(minorHalfWidth + 0.5 - cd.x * cell, 0.0, 1.0);
+        float majorInk = clamp(majorHalfWidth + 0.5 - cd.y * cell, 0.0, 1.0);
+        color = mix(color, mix(minorShadow, minorLit, litMix), minorInk);
+        color = mix(color, mix(majorShadow, majorLit, litMix), majorInk);
       }
     }
     gl_FragColor = vec4(color, 1.0);
@@ -235,20 +247,31 @@ const glyphFragment = /* glsl */ `
   }
 `;
 
+/** Render-target precision for elevation: float32, else half float, else 8 bit
+ * (contours off: 8 bits cannot place a 50 m level, see console.info). */
+function pickTargetType(renderer) {
+  if (renderer.extensions.has('EXT_color_buffer_float')) return THREE.FloatType;
+  if (renderer.extensions.has('EXT_color_buffer_half_float')) return THREE.HalfFloatType;
+  return THREE.UnsignedByteType;
+}
+
 /**
  * Create the ASCII renderer for `renderer`. Per frame call
  * `render(scene, camera, bufW, bufH, gridOffset, layer)`: it draws `layer` of the
- * scene into the cell-aligned target and the glyphs onto the canvas (clearing it).
+ * scene into the corner-aligned target and the glyphs onto the canvas (clearing it).
  * `setCell(cssPx, pixelRatio, glyphs?)` changes density or ramp length (rebuilds
- * the atlas so glyphs stay crisp).
+ * the atlas so glyphs stay crisp). `contours`: { minM, maxM, interval } or null.
  */
 export function createAsciiRenderer(
   renderer, { cellCss = 8, pixelRatio = 1, glyphs = 32, contours = null } = {},
 ) {
-  const halfFloatOk =
-    renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float');
+  const type = pickTargetType(renderer);
+  const contoursOn = Boolean(contours) && type !== THREE.UnsignedByteType;
+  if (contours && !contoursOn) {
+    console.info('ASCII map: this GPU cannot render to float targets, so contour lines are hidden in ASCII mode (they still show with ASCII Off).');
+  }
   const target = new THREE.WebGLRenderTarget(1, 1, {
-    type: halfFloatOk ? THREE.HalfFloatType : THREE.UnsignedByteType, // linear colour needs > 8 bits in shadow
+    type,
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
     generateMipmaps: false,
@@ -271,16 +294,18 @@ export function createAsciiRenderer(
       shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
       sunColor: { value: new THREE.Color(PALETTE.amber) },
       emptyColor: { value: new THREE.Color(PALETTE.navy) },
-      // contours: { minM, maxM, interval } from the site heightmap, or null for none
-      tLine: { value: null },
-      contourOn: { value: contours ? 1 : 0 },
+      contourOn: { value: contoursOn ? 1 : 0 },
       minM: { value: contours?.minM ?? 0 },
       maxM: { value: Math.max(contours?.maxM ?? 1, (contours?.minM ?? 0) + 1) },
       interval: { value: contours?.interval ?? 50 },
       majorEvery: { value: MAJOR_EVERY },
-      underGlyph: { value: 0.35 },
-      contourShadow: { value: new THREE.Color(PALETTE.teal).lerp(new THREE.Color(PALETTE.grey), 0.4).multiplyScalar(0.35) },
-      contourLit: { value: new THREE.Color(PALETTE.amber).multiplyScalar(0.55) },
+      minorHalfWidth: { value: 0.5 },
+      majorHalfWidth: { value: 1 },
+      underGlyph: { value: CONTOUR_UNDER_GLYPH },
+      minorShadow: { value: contourColor('minorShadow') },
+      majorShadow: { value: contourColor('majorShadow') },
+      minorLit: { value: contourColor('minorLit') },
+      majorLit: { value: contourColor('majorLit') },
     },
     vertexShader: glyphVertex,
     fragmentShader: glyphFragment,
@@ -300,12 +325,8 @@ export function createAsciiRenderer(
 
   const api = {
     ramp: '',
-    halfFloat: halfFloatOk,
     get cellPx() {
       return material.uniforms.cell.value;
-    },
-    get target() {
-      return target;
     },
     setCell(css, dpr, count = glyphs) {
       glyphs = count;
@@ -313,10 +334,10 @@ export function createAsciiRenderer(
       atlas?.texture.dispose();
       atlas = buildGlyphAtlas({ count: glyphs, cellPx });
       material.uniforms.tGlyph.value = atlas.texture;
-      material.uniforms.tLine.value?.dispose();
-      material.uniforms.tLine.value = buildLineAtlas(cellPx);
       material.uniforms.glyphCount.value = atlas.count;
       material.uniforms.cell.value = cellPx;
+      material.uniforms.minorHalfWidth.value = Math.max(1, cellPx * MINOR_STROKE_PER_CELL) / 2;
+      material.uniforms.majorHalfWidth.value = Math.max(1.6, cellPx * MAJOR_STROKE_PER_CELL) / 2;
       api.ramp = atlas.ramp;
     },
     render(scene, camera, bufW, bufH, gridOffset, layer = 0) {
@@ -353,7 +374,6 @@ export function createAsciiRenderer(
     },
     dispose() {
       atlas?.texture.dispose();
-      material.uniforms.tLine.value?.dispose();
       target.dispose();
       quad.geometry.dispose();
       material.dispose();

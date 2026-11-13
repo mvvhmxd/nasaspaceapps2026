@@ -11,7 +11,7 @@ import { createSkyMarkers } from './markers.js';
 import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
 import { createFpsGovernor } from './fpsGovernor.js';
 import { createTerrainMaterial } from './terrainMaterial.js';
-import { elevationRange, contourInterval, MAJOR_EVERY } from './contours.js';
+import { siteContours } from './contours.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
@@ -60,8 +60,7 @@ export function createSurfaceScene(
   scene.add(sun, sun.target);
 
   // Contours from the real heightmap: levels every `interval` m (index line every 5th).
-  const { minM, maxM } = elevationRange(hm.heights);
-  const interval = contourInterval(minM, maxM);
+  const { minM, maxM, interval } = siteContours(hm); // cached: the map key reads the same
   const terrainMat = createTerrainMaterial({ minM, maxM, interval, pixelRatio });
   const terrain = buildTerrain(hm, { material: terrainMat.material });
   scene.add(terrain);
@@ -222,10 +221,6 @@ export function createSurfaceScene(
     get asciiOn() { return preset().ascii; },
     get autoOff() { return quality === 'off' && lastReason === 'auto'; },
     get ramp() { return ascii.ramp; },
-    /** three.js render stats (draw calls, live textures / geometries) for profiling. */
-    get renderInfo() { return renderer.info; },
-    /** Contour spacing for the map key: { interval, majorEvery } in metres / levels. */
-    contours: { interval, majorEvery: MAJOR_EVERY },
     dispose() {
       renderer.setAnimationLoop(null);
       window.removeEventListener('keydown', onKey);
