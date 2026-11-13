@@ -8,7 +8,8 @@
   padding: 6px 10px 4px;
 }
 .hs-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; line-height: 1.3; }
-.hs-title { color: #fff; }
+.hs-title { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hs-note { color: rgba(201, 206, 214, 0.55); font-size: 11px; }
 .hs-gap { color: rgba(245, 165, 36, 0.9); white-space: nowrap; }
 .hs-svg { display: block; width: 100%; height: auto; margin-top: 2px; overflow: visible; }
 
@@ -38,10 +39,24 @@
 .hs-body[data-pinned='above'] .hs-pin-up,
 .hs-body[data-pinned='below'] .hs-pin-down { display: inline; }
 
-/* Too narrow to fit between the two top panels: drop below the site panel. */
+/* Too narrow to fit between the two top panels: move to the bottom right, above
+   the time controls and beside the map key, so it never covers the lander and
+   its pointers in the middle of the map. */
 @media (max-width: 1099px) {
-  .horizon-strip { top: 168px; left: 12px; transform: none; width: min(560px, calc(100% - 24px)); }
+  .horizon-strip {
+    top: auto; bottom: 76px; left: auto; right: 12px; transform: none;
+    width: min(520px, calc(100% - 536px)); /* the map key is ~500 px wide on the left */
+  }
 }
-@media (max-width: 699px) {
+/* No room beside the map key: hide it (the HUD text and the map pointers carry
+   the same Sun / Earth state). */
+@media (max-width: 879px) {
   .horizon-strip { display: none; }
+}
+/* Narrower strip: the "hourly data, motion smoothed" note goes on its own line
+   instead of being cut off. */
+@media (max-width: 1299px) {
+  .hs-title { white-space: normal; overflow: visible; }
+  .hs-note { display: block; }
+  .hs-sep { display: none; }
 }

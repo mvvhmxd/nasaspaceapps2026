@@ -1,8 +1,9 @@
 // ASCII quality control: High / Balanced / Performance / Off. The scene owns the
 // current value and reports changes (including the `A` key and low-fps steps).
+import { memo } from 'react';
 import { QUALITY_ORDER, QUALITY_PRESETS, AUTO_FLOOR } from '../render/quality.js';
 
-export default function AsciiQuality({ ascii, onChange }) {
+function AsciiQuality({ ascii, onChange }) {
   return (
     <div>
       <label>
@@ -21,3 +22,5 @@ export default function AsciiQuality({ ascii, onChange }) {
     </div>
   );
 }
+
+export default memo(AsciiQuality); // re-renders only when the quality changes

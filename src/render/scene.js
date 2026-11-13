@@ -12,6 +12,7 @@ import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './qua
 import { createFpsGovernor } from './fpsGovernor.js';
 import { createTerrainMaterial } from './terrainMaterial.js';
 import { siteContours } from './contours.js';
+import { motionShadowSize } from './shadowLod.js';
 import { PALETTE } from '../theme.js';
 
 const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole crop
@@ -138,14 +139,77 @@ export function createSurfaceScene(
   window.addEventListener('keydown', onKey);
 
   const sunDir = new THREE.Vector3();
+  const checkDir = new THREE.Vector3();
 
-  /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
-  function setSun(az, el) {
+  function pointLight(az, el, shadow = true) {
     directionFromAzEl(az, el, sunDir);
     sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
     sun.target.position.set(0, 0, 0);
-    requestShadowUpdate();
-    return { renderBlocked: blockedToward(terrain, eye, sunDir) };
+    if (shadow) requestShadowUpdate();
+  }
+
+  /** Render check for one hour: does the terrain mesh block the Sun at (az, el)?
+   * Raycast only; the light does not move. */
+  function checkSun(az, el) {
+    return { renderBlocked: blockedToward(terrain, eye, directionFromAzEl(az, el, checkDir)) };
+  }
+
+  /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
+  function setSun(az, el) {
+    pointLight(az, el);
+    return checkSun(az, el);
+  }
+
+  // Truth flags from the sim's whole hour (setSky); smooth frames move only positions.
+  let skyFlags = { sunlit: true, earthVisible: true };
+  // Motion level of detail. Redrawing a 4096² shadow map every frame does not fit
+  // a 60 Hz frame at DPR 2 (measured: p95 31 ms vs 17 ms without the redraws).
+  // While the Sun is moving, the shadow map is sized to the glyph cell
+  // (shadowLod.js: texel <= half a cell, 512² at default zoom); after
+  // MOTION_LINGER_MS without movement the preset's full-size map comes back for
+  // the still view. Continuous playback keeps the motion size (it changes only
+  // when the zoom crosses a power of two), so nothing is reallocated per hour.
+  const MOTION_LINGER_MS = 1500;
+  const shadowCoverM = sc.right - sc.left;
+  function motionSize() {
+    const mPerPx = (camera.top - camera.bottom) / (camera.zoom * Math.max(1, buffer.y));
+    return motionShadowSize({
+      coverM: shadowCoverM,
+      cellM: preset().ascii ? ascii.cellPx * mPerPx : null,
+      stillSize: stillShadowMap(),
+    });
+  }
+  let motionUntil = -Infinity;
+  const stillShadowMap = () => preset().shadowMap;
+  // Safety net on slow GPUs: redraw the shadows every `shadowStride` smooth frames;
+  // the stride adapts to the frame time (1 = every frame, up to 4). Between redraws
+  // three.js keeps the shadow matrix of the last redraw, so lighting and shadows
+  // stay consistent, just updated at 60 / 30 / 20 / 15 Hz.
+  const MAX_SHADOW_STRIDE = 4;
+  let shadowStride = 1;
+  let sinceShadow = 0;
+  let frameMsAvg = 16.7; // smoothed frame time, updated by the animation loop
+  let fastFrames = 0;
+  function adaptShadowStride() {
+    if (frameMsAvg > 18.5 && shadowStride < MAX_SHADOW_STRIDE) { shadowStride++; fastFrames = 0; }
+    else if (frameMsAvg < 17.5 && shadowStride > 1 && ++fastFrames > 120) { shadowStride--; fastFrames = 0; }
+  }
+  /** One display frame between hourly samples (render/skyClock.skyAt): moves the
+   * light, the shadows and the pointer azimuths. No raycast; the solid / hollow
+   * state and the lander colour stay with the sim's whole hour. Pass
+   * `{ final: true }` for the settled frame: its shadows are always redrawn. */
+  function setSkySmooth(sample, { final = false } = {}) {
+    if (!final) {
+      // Moving: lighter shadow map. A final (settled or snapped) frame does not
+      // count as motion, so a still view keeps, or returns to, the full map.
+      motionUntil = performance.now() + MOTION_LINGER_MS;
+      applyShadowMap(motionSize());
+    }
+    adaptShadowStride();
+    const redraw = final || ++sinceShadow >= shadowStride;
+    if (redraw) sinceShadow = 0;
+    pointLight(sample.sunAz, sample.sunEl, redraw);
+    skyMarkers.set({ ...skyFlags, sunAz: sample.sunAz, earthAz: sample.earthAz });
   }
 
   function setLanderInShadow(inShadow) {
@@ -155,7 +219,16 @@ export function createSurfaceScene(
 
   /** Sun / Earth pointers for one hour. Pass the sim's stateAt() result. */
   function setSky(sky) {
+    skyFlags = { sunlit: sky.sunlit, earthVisible: sky.earthVisible };
     skyMarkers.set(sky);
+  }
+
+  // Per-frame subscribers on the one animation loop (no second rAF loop).
+  const frameSubs = new Set();
+  /** Run `cb(now)` before every frame is drawn; returns an unsubscribe function. */
+  function onFrame(cb) {
+    frameSubs.add(cb);
+    return () => frameSubs.delete(cb);
   }
 
   // Exact drawing-buffer size: three.js floors w * dpr, which differs from
@@ -194,11 +267,16 @@ export function createSurfaceScene(
 
   let frames = 0;
   let last = performance.now();
+  let prevFrame = performance.now();
   renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    frameMsAvg += (Math.min(now - prevFrame, 100) - frameMsAvg) * 0.1;
+    prevFrame = now;
+    if (now > motionUntil) applyShadowMap(stillShadowMap()); // still again: full-size shadows (no-op when already)
+    for (const cb of frameSubs) cb(now);
     controls.update();
     draw();
     frames++;
-    const now = performance.now();
     if (now - last >= 500) {
       const fps = Math.round((frames * 1000) / (now - last));
       onFps?.(fps);
@@ -213,16 +291,21 @@ export function createSurfaceScene(
 
   return {
     setSun,
+    checkSun,
+    setSkySmooth,
     setLanderInShadow,
     setSky,
+    onFrame,
     setAscii: (on) => setAscii(on),
     setQuality: (name) => setQuality(name),
     get quality() { return quality; },
+    get shadowStride() { return shadowStride; },
     get asciiOn() { return preset().ascii; },
     get autoOff() { return quality === 'off' && lastReason === 'auto'; },
     get ramp() { return ascii.ramp; },
     dispose() {
       renderer.setAnimationLoop(null);
+      frameSubs.clear();
       window.removeEventListener('keydown', onKey);
       ro.disconnect();
       controls.dispose();

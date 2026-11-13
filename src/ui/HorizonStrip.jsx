@@ -7,7 +7,7 @@
 // motion the parent calls ref.setSky(sample) every frame with an interpolated
 // sample (render/skyClock.skyAt); that updates SVG attributes directly, with no
 // React re-render per frame.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import {
   azToX, elToY, elevationScale, pinState, skylinePaths, exaggeration, compassTicks, gapLabel,
 } from './horizonGeometry.js';
@@ -63,12 +63,20 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
   }, [scale]);
 
   useImperativeHandle(ref, () => ({ setSky: apply }), [apply]);
-  useEffect(() => { apply(sky); }, [apply, sky]);
+  // Initial position only (and after a site change). From then on the parent
+  // drives every position through ref.setSky, so a new hourly `sky` prop never
+  // snaps the markers ahead of the eased display clock.
+  const skyRef = useRef(sky);
+  skyRef.current = sky;
+  useEffect(() => { apply(skyRef.current); }, [apply]);
 
   return (
     <section className="hud horizon-strip" aria-label="Horizon seen from the lander">
       <header className="hs-head">
-        <span className="hs-title">Horizon from the lander</span>
+        <span className="hs-title">
+          Horizon from the lander
+          <span className="hs-note"><span className="hs-sep" aria-hidden="true"> · </span>hourly data, motion smoothed</span>
+        </span>
         <span className="hs-gap" aria-hidden="true" ref={gapTextRef} />
       </header>
       <svg
@@ -115,4 +123,4 @@ const HorizonStrip = forwardRef(function HorizonStrip({ site, sky }, ref) {
   );
 });
 
-export default HorizonStrip;
+export default memo(HorizonStrip);

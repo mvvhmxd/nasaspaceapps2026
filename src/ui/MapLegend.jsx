@@ -1,8 +1,9 @@
 // Compass and key for the map. The map is always north-up.
+import { memo } from 'react';
 import { siteContours } from '../render/contours.js';
 import { contourCss } from '../render/contourStyle.js';
 
-export default function MapLegend({ site }) {
+function MapLegend({ site }) {
   // Same cached values the renderer uses (computed once per heightmap).
   const c = site?.heightmap?.heights ? siteContours(site.heightmap) : null;
   return (
@@ -28,3 +29,5 @@ export default function MapLegend({ site }) {
     </section>
   );
 }
+
+export default memo(MapLegend); // props change only with the site
