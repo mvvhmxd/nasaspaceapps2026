@@ -222,8 +222,8 @@ const glyphFragment = /* glsl */ `
       vec2 local = fract(p / cell);
       if (dots > 0.5) {
         // Halftone: one round dot per cell, radius grows with brightness, keeping the scene's
-        // own colour, so the ground reads as game state: amber = sunlight (charging), blue =
-        // shadow (draining), white = the rover's floodlight. Coloured things (Earth) keep theirs.
+        // own colour: sunlit regolith is neutral white-grey, shadow is black (no dots), as in
+        // the reference render. Coloured things (the Earth) keep theirs.
         float dl = smoothstep(0.03, 0.85, y);
         float radius = 0.52 * sqrt(dl);
         float edge = 1.0 / cell;
@@ -307,14 +307,14 @@ export function createAsciiRenderer(
       cell: { value: 8 },
       gridOffset: { value: new THREE.Vector2(0, 0) },
       fill: { value: 0.45 }, // scene colour showing behind the glyph
-      saturation: { value: 1.4 },
+      saturation: { value: 0.0 }, // moon regolith is neutral grey (reference render)
       gain: { value: 1.6 }, // glyph tint brightness
-      duotone: { value: 0.5 }, // 0 = scene colours only, 1 = pure navy-to-amber grade
+      duotone: { value: 0.5 }, // 0 = scene colours only, 1 = pure space-to-regolith grade
       contrastLo: { value: 0.04 },
       contrastHi: { value: 0.8 },
-      shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
-      sunColor: { value: new THREE.Color(PALETTE.amber) },
-      emptyColor: { value: new THREE.Color(PALETTE.navy) },
+      shadowColor: { value: new THREE.Color(PALETTE.space) },
+      sunColor: { value: new THREE.Color(PALETTE.moonHi) },
+      emptyColor: { value: new THREE.Color(PALETTE.space) },
       dots: { value: 0 },
       contourOn: { value: contoursOn ? 1 : 0 },
       minM: { value: contours?.minM ?? 0 },
@@ -343,7 +343,7 @@ export function createAsciiRenderer(
   const terrainCamera = new THREE.OrthographicCamera();
   const perspectiveCamera = new THREE.PerspectiveCamera();
   const clearColor = new THREE.Color();
-  const navy = new THREE.Color(PALETTE.navy);
+  const navy = new THREE.Color(PALETTE.space); // cleared to alpha 0; colour unused
   let atlas = null;
 
   const api = {
@@ -365,7 +365,7 @@ export function createAsciiRenderer(
     setDots(on) {
       material.uniforms.dots.value = on ? 1 : 0;
       material.uniforms.contourOn.value = on ? 0 : contoursOn ? 1 : 0;
-      material.uniforms.emptyColor.value.set(on ? '#060a1c' : PALETTE.navy); // deep navy behind the dots
+      material.uniforms.emptyColor.value.set(PALETTE.space); // black space behind glyphs and dots
     },
     render(scene, camera, bufW, bufH, gridOffset, layer = 0) {
       const cellPx = material.uniforms.cell.value;

@@ -143,7 +143,7 @@ export const CONTOUR_STYLE = {
   minorShadow: { key: 'grey', scale: 0.1 },
   majorShadow: { key: 'grey', scale: 0.2 },
   minorLit: { key: 'grey', scale: 0.28 },
-  majorLit: { key: 'amber', scale: 0.8 },
+  majorLit: { key: 'moonHi', scale: 0.85 },
 };
 /** Strength of the density glyph left under a contour stroke in ASCII mode. */
 export const CONTOUR_UNDER_GLYPH = 0.35;

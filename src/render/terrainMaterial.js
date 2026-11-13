@@ -77,8 +77,8 @@ void main() {`,
     // index contours are 5x further apart, so they stay longer.
     float spacingPx = uInterval * mix(1.0, uMajorEvery, isMajor) / mpp;
     line *= smoothstep(2.0, 4.0, spacingPx);
-    // Shadow vs sunlight from the shaded colour: restrained grey in shadow, amber
-    // only for index lines in sunlight (teal is reserved for Earth / comms).
+    // Shadow vs sunlight from the shaded colour: restrained grey in shadow, brighter
+    // regolith grey for index lines in sunlight (teal is reserved for Earth / comms).
     float lum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
     float litMix = smoothstep(0.03, 0.2, lum);
     vec3 lineColor = mix(mix(uMinorShadow, uMinorLit, litMix), mix(uMajorShadow, uMajorLit, litMix), isMajor);

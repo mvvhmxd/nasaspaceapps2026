@@ -100,12 +100,12 @@ export function createSurfaceScene(
   renderer.shadowMap.autoUpdate = false;
   const requestShadowUpdate = () => { renderer.shadowMap.needsUpdate = true; };
   requestShadowUpdate();
-  renderer.setClearColor(PALETTE.navy);
+  renderer.setClearColor(PALETTE.space);
 
   const scene = new THREE.Scene();
 
   // Faint fill so shadowed ground is dark navy, not pure black (earthshine-ish).
-  const fill = new THREE.HemisphereLight(0x4a5c96, PALETTE.navy, 0.5);
+  const fill = new THREE.HemisphereLight(0x2a2c30, PALETTE.space, 0.5); // faint neutral fill: shadow stays near black
   scene.add(fill);
   // Rover floodlight (surface view only): lights the ground around the rover so shadowed terrain is readable.
   const flood = new THREE.PointLight(0xffffff, 0, 1400, 1);
@@ -337,17 +337,17 @@ export function createSurfaceScene(
    */
   function applyExposure() {
     if (view !== 'surface') {
-      sun.intensity = sunFarBlocked ? 0 : MAP_SUN_INTENSITY; sun.color.set(0xffe2b0);
-      fill.intensity = 0.5; fill.color.set(0x4a5c96);
+      sun.intensity = sunFarBlocked ? 0 : MAP_SUN_INTENSITY; sun.color.set(0xffffff); // neutral regolith
+      fill.intensity = 0.5; fill.color.set(0x2a2c30);
       flood.intensity = 0;
       earthLight.intensity = 0;
       return;
     }
     const lit = !siteDark && sunEl > 0;
-    sun.color.set(0xffb648); // amber: sunlit ground
+    sun.color.set(0xffffff); // sunlit regolith: neutral white-grey (reference render)
     sun.intensity = lit ? 1 / (LAMBERT * EXPOSURE * Math.sin((Math.max(sunEl, 0.4) * Math.PI) / 180)) : 0;
-    fill.color.set(0x4f74ff); // blue: ground in shadow
-    fill.intensity = lit ? 0.06 : 0.14;
+    fill.color.set(0x2a2c30); // shadow: near black, as in the reference render
+    fill.intensity = lit ? 0.02 : 0.05;
     flood.intensity = 70;
     earthLight.intensity = earthEl > 0 ? 0.05 / (LAMBERT * Math.sin((Math.max(earthEl, 1) * Math.PI) / 180)) : 0;
   }
