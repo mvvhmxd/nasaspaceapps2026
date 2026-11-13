@@ -16,12 +16,17 @@ const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole cro
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
 const FPS_FLOOR = 30; // three readings below this switch the ASCII pass off
 const SKY_DISTANCE = 150000; // m; where the Sun, Earth and stars are drawn in the surface view
-const BODY_SCALE = 3; // Sun and Earth are drawn 3x their true angular size so they read on screen
+const SUN_SCALE = 4; // the Sun is drawn 4x and the Earth 8x their true angular size so they read on screen
+const EARTH_SCALE = 8;
+const EXPOSURE = 11; // surface view: Sun-facing slopes this many times brighter than level ground reach white
 const SUN_DIAMETER_DEG = 0.53;
 const EARTH_DIAMETER_DEG = 1.9;
 const RING_RADIUS = 6000; // m; the far-horizon silhouette sits just outside the terrain crop
-const SURFACE_EYE_M = 3; // camera height above the ground in the surface view
-const SURFACE_CELL_CSS = 6; // finer dots than the map's glyph cells
+const CHASE_HEIGHT_M = 220; // surface view: the camera rides above and behind the rover,
+const CHASE_BACK_M = 600; //   high enough to see the real crater relief of the 40 m terrain grid
+const SURFACE_CELL_CSS = 8;
+const MAP_SUN_INTENSITY = 3.4;
+const LAMBERT = 0.19; // roughly albedo / pi for the terrain material
 
 /** A small procedural Earth (ocean, cloud and land blobs). Drawn by this code; no image file. */
 function makeEarthTexture() {
@@ -36,7 +41,11 @@ function makeEarthTexture() {
     g.fillStyle = color;
     for (let i = 0; i < n; i++) { g.beginPath(); g.ellipse(rnd() * 128, rnd() * 128, size * (0.5 + rnd()), size * (0.3 + rnd() * 0.5), rnd() * 3, 0, Math.PI * 2); g.fill(); }
   };
-  blob('#4f8f5a', 7, 14); blob('#9a8a5a', 4, 9); blob('rgba(255,255,255,0.85)', 16, 10);
+  blob('#3f7f52', 7, 14); blob('#8a7a50', 4, 9); blob('rgba(255,255,255,0.9)', 26, 9);
+  // Night side: a soft terminator so Earth is not a flat disc (the phase is not computed).
+  const shade = g.createLinearGradient(20, 100, 100, 30);
+  shade.addColorStop(0, 'rgba(0,0,0,0.92)'); shade.addColorStop(0.45, 'rgba(0,0,0,0.25)'); shade.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = shade; g.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -56,9 +65,10 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   const scene = new THREE.Scene();
 
   // Faint fill so shadowed ground is dark navy, not pure black (earthshine-ish).
-  scene.add(new THREE.HemisphereLight(0x4a5c96, PALETTE.navy, 0.5));
+  const fill = new THREE.HemisphereLight(0x4a5c96, PALETTE.navy, 0.5);
+  scene.add(fill);
 
-  const sun = new THREE.DirectionalLight(0xffe2b0, 3.4);
+  const sun = new THREE.DirectionalLight(0xffe2b0, MAP_SUN_INTENSITY);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   const sc = sun.shadow.camera;
@@ -121,11 +131,11 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   const sky = new THREE.Group();
   sky.visible = false;
   scene.add(sky);
-  const bodySize = (deg) => 2 * SKY_DISTANCE * Math.tan((deg * BODY_SCALE * Math.PI) / 360);
+  const bodySize = (deg) => 2 * SKY_DISTANCE * Math.tan((deg * Math.PI) / 360);
   const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: '#fff3d0', fog: false }));
-  sunSprite.scale.setScalar(bodySize(SUN_DIAMETER_DEG));
+  sunSprite.scale.setScalar(bodySize(SUN_DIAMETER_DEG * SUN_SCALE));
   const earthSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeEarthTexture(), fog: false }));
-  earthSprite.scale.setScalar(bodySize(EARTH_DIAMETER_DEG));
+  earthSprite.scale.setScalar(bodySize(EARTH_DIAMETER_DEG * EARTH_SCALE));
   const starPos = new Float32Array(900 * 3);
   let starSeed = 2026;
   const srnd = () => { starSeed = (starSeed * 16807) % 2147483647; return starSeed / 2147483647; };
@@ -135,27 +145,35 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 2, sizeAttenuation: false }));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 1.6, sizeAttenuation: false }));
   stars.layers.set(SHARP_LAYER);
+  const bigGeo = new THREE.BufferGeometry();
+  bigGeo.setAttribute('position', new THREE.BufferAttribute(starPos.slice(0, 70 * 3), 3));
+  const bigStars = new THREE.Points(bigGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 3.2, sizeAttenuation: false }));
+  bigStars.layers.set(SHARP_LAYER);
   // Ring whose top edge, seen from the lander, sits at the site's real horizon elevation in every direction.
-  const ringPos = [], ringIdx = [];
+  const ringPos = [], ringIdx = [], ringCol = [];
   for (let i = 0; i <= 360; i++) {
     const a = (i % 360) * (Math.PI / 180);
     const top = eye.y + RING_RADIUS * Math.tan((site.horizonMask[i % 360] * Math.PI) / 180);
-    ringPos.push(Math.sin(a) * RING_RADIUS, top, -Math.cos(a) * RING_RADIUS, Math.sin(a) * RING_RADIUS, -9000, -Math.cos(a) * RING_RADIUS);
+    ringPos.push(Math.sin(a) * RING_RADIUS, top, -Math.cos(a) * RING_RADIUS, Math.sin(a) * RING_RADIUS, top - 900, -Math.cos(a) * RING_RADIUS);
+    ringCol.push(0.1, 0.1, 0.105, 0, 0, 0); // bright at the skyline, fading to black below it
     if (i < 360) ringIdx.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 2, 2 * i + 1, 2 * i + 3);
   }
   const ringGeo = new THREE.BufferGeometry();
   ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(ringPos, 3));
+  ringGeo.setAttribute('color', new THREE.Float32BufferAttribute(ringCol, 3));
   ringGeo.setIndex(ringIdx);
-  const farRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: '#39405a', side: THREE.DoubleSide }));
-  sky.add(sunSprite, earthSprite, stars, farRing);
+  const farRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  sky.add(sunSprite, earthSprite, stars, bigStars, farRing);
 
   const surfaceCam = new THREE.PerspectiveCamera(50, 1, 2, SKY_DISTANCE * 4);
   surfaceCam.layers.enableAll();
   let view = 'map';
   let mapCellCss = cellCss;
-  let yaw = 0, pitch = 4; // degrees: where the surface camera looks
+  let yaw = 0, pitch = -7; // degrees: where the surface camera looks
+  let sunEl = 1, siteDark = false;
+  const camBack = new THREE.Vector3();
   const roverPos = new THREE.Vector3(0, eye.y, 0);
   const earthDir = new THREE.Vector3(0, -1, 0);
   const lookDir = new THREE.Vector3();
@@ -195,9 +213,29 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
   function setSun(az, el) {
     directionFromAzEl(az, el, sunDir);
+    sunEl = el;
+    applyExposure();
     sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
     sun.target.position.set(0, 0, 0);
     return { renderBlocked: blockedToward(terrain, eye, sunDir) };
+  }
+
+  /**
+   * Map view: fixed light. Surface view: expose like a camera, so level ground under a grazing
+   * Sun is mid-grey, Sun-facing slopes are white and shadows are black. When the sim says the
+   * site is in shadow, the direct light is off and a dim fill stands in for earthshine.
+   */
+  function applyExposure() {
+    if (view !== 'surface') {
+      sun.intensity = MAP_SUN_INTENSITY; sun.color.set(0xffe2b0);
+      fill.intensity = 0.5; fill.color.set(0x4a5c96);
+      return;
+    }
+    const lit = !siteDark && sunEl > 0;
+    sun.color.set(0xffffff);
+    sun.intensity = lit ? 1 / (LAMBERT * EXPOSURE * Math.sin((Math.max(sunEl, 0.4) * Math.PI) / 180)) : 0;
+    fill.color.set(0xffffff);
+    fill.intensity = lit ? 0.03 : 0.5;
   }
 
   function setEarth(az, el) {
@@ -210,10 +248,11 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
     sky.visible = view === 'surface';
     lander.visible = view === 'map';
     beacon.visible = view === 'surface';
-    prospects.visible = view === 'map'; // the map markers are 60 m tall; the surface view uses the HUD bearing instead
+    rover.scale.setScalar(view === 'surface' ? 0.22 : 1);
+    applyExposure();
     ascii.setCell(view === 'surface' ? SURFACE_CELL_CSS : mapCellCss, pixelRatio);
     controls.enabled = view === 'map';
-    rover.visible = roverShown && view === 'map';
+    rover.visible = roverShown;
     ascii.setDots(view === 'surface');
     renderPass.camera = view === 'surface' ? surfaceCam : camera;
   }
@@ -221,13 +260,13 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   let roverShown = false;
   function setRover(r) {
     roverShown = !!r;
-    rover.visible = roverShown && view === 'map';
+    rover.visible = roverShown;
     if (!r) return;
     const y = groundY(hm, r.x, r.z);
     rover.position.set(r.x, y, r.z);
     rover.rotation.y = (-r.heading * Math.PI) / 180;
     roverMat.color.set(!r.alive ? PALETTE.red : r.sunlit ? '#ffffff' : '#8fa0d8');
-    roverPos.set(r.x, y + SURFACE_EYE_M, r.z);
+    roverPos.set(r.x, y, r.z);
   }
 
   function setProspects(list, collected = []) {
@@ -247,7 +286,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
 
   function turn(dYaw, dPitch = 0) {
     yaw = (yaw + dYaw + 360) % 360;
-    pitch = Math.max(-25, Math.min(60, pitch + dPitch));
+    pitch = Math.max(-40, Math.min(35, pitch + dPitch));
   }
   let dragging = null;
   const onDown = (e) => { if (view === 'surface') dragging = { x: e.clientX, y: e.clientY }; };
@@ -265,6 +304,8 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
     bodyMat.color.set(inShadow ? PALETTE.red : PALETTE.grey);
     ring.material.color.set(inShadow ? PALETTE.red : PALETTE.amber);
     lampMat.color.set(inShadow ? PALETTE.red : PALETTE.amber);
+    siteDark = inShadow;
+    applyExposure();
   }
 
   function resize() {
@@ -285,12 +326,16 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   function draw() {
     const cam = view === 'surface' ? surfaceCam : camera;
     if (view === 'surface') {
-      surfaceCam.position.copy(roverPos);
-      surfaceCam.lookAt(lookDir.copy(directionFromAzEl(yaw, pitch)).add(roverPos));
-      sky.position.set(0, 0, 0);
-      sunSprite.position.copy(sunDir).multiplyScalar(SKY_DISTANCE).add(roverPos);
-      earthSprite.position.copy(earthDir).multiplyScalar(SKY_DISTANCE).add(roverPos);
-      stars.position.copy(roverPos);
+      directionFromAzEl(yaw, 0, camBack).multiplyScalar(-CHASE_BACK_M);
+      surfaceCam.position.copy(roverPos).add(camBack);
+      surfaceCam.position.y += CHASE_HEIGHT_M;
+      const under = groundY(hm, surfaceCam.position.x, surfaceCam.position.z);
+      if (!Number.isNaN(under)) surfaceCam.position.y = Math.max(surfaceCam.position.y, under + 40);
+      surfaceCam.lookAt(lookDir.copy(directionFromAzEl(yaw, pitch)).add(surfaceCam.position));
+      sunSprite.position.copy(sunDir).multiplyScalar(SKY_DISTANCE).add(surfaceCam.position);
+      earthSprite.position.copy(earthDir).multiplyScalar(SKY_DISTANCE).add(surfaceCam.position);
+      stars.position.copy(surfaceCam.position);
+      bigStars.position.copy(surfaceCam.position);
     }
     if (asciiOn) {
       cam.layers.set(0); // terrain (and the sky bodies) through the glyph or dot pass

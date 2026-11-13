@@ -35,6 +35,7 @@ export default function App() {
   const keysRef = useRef(new Set());
   const [rover, setRover] = useState(null);
   const [view, setView] = useState('map');
+  const [hudHidden, setHudHidden] = useState(false);
   const [sites, setSites] = useState(null); // { id: site }
   const [error, setError] = useState(null);
   const [screen, setScreen] = useState('title'); // title | missions | brief | planner | schedule | surface | debrief
@@ -285,6 +286,7 @@ export default function App() {
       if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) setPlaying((p) => !p); }
       if (e.code === 'KeyZ' && !e.repeat) setForceSleep((f) => !f);
       if (e.code === 'KeyV' && !e.repeat) setView((v) => (v === 'map' ? 'surface' : 'map'));
+      if (e.code === 'KeyH' && !e.repeat) setHudHidden((h) => !h);
       if (DRIVE_KEYS[e.code]) { e.preventDefault(); keysRef.current.add(DRIVE_KEYS[e.code]); }
     };
     const onRelease = (e) => { if (DRIVE_KEYS[e.code]) keysRef.current.delete(DRIVE_KEYS[e.code]); };
@@ -314,7 +316,7 @@ export default function App() {
   const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
 
   return (
-    <div className="app">
+    <div className={`app${hudHidden && screen === 'surface' ? ' nohud' : ''}`}>
       <canvas ref={canvasRef} className="view" aria-label="Top-down terrain map of the landing site" />
       {!sites && <div className="msg">Loading landing sites&hellip;</div>}
       {site && sky && (

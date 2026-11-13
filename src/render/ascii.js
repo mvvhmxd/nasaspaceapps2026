@@ -128,14 +128,16 @@ const AsciiShader = {
 
       if (dots > 0.5) {
         // Halftone: one round dot per cell, radius grows with brightness, keeps the scene's own colour.
-        // A grazing Sun leaves most ground dim, so the dot size uses a brighter curve than the glyphs.
-        float dl = smoothstep(0.015, 0.4, y);
-        float radius = 0.5 * sqrt(dl);
+        // White dots on black, sized by brightness; strongly coloured things (Earth) keep their colour.
+        float dl = smoothstep(0.03, 0.85, y);
+        float radius = 0.52 * sqrt(dl);
         float edge = 1.0 / cell;
-        float dotInk = 1.0 - smoothstep(radius - edge, radius + edge, length(local - 0.5));
-        vec3 base = mix(vec3(dot(scene, LUMA)), scene, 0.75);
-        vec3 dotColor = clamp(base / max(max(base.r, max(base.g, base.b)), 0.001) * mix(0.55, 1.0, dl), 0.0, 1.0);
-        gl_FragColor = vec4(mix(emptyColor * 0.35, dotColor, dotInk * step(0.01, dl)), 1.0);
+        float dotInk = (1.0 - smoothstep(radius - edge, radius + edge, length(local - 0.5))) * step(0.02, dl);
+        float maxc = max(scene.r, max(scene.g, scene.b));
+        float minc = min(scene.r, min(scene.g, scene.b));
+        float chroma = (maxc - minc) / max(maxc, 0.001);
+        vec3 dotColor = mix(vec3(0.93), scene / max(maxc, 0.001), smoothstep(0.15, 0.45, chroma)) * mix(0.6, 1.0, dl);
+        gl_FragColor = vec4(mix(emptyColor, dotColor, dotInk), 1.0);
         return;
       }
 
@@ -167,6 +169,7 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
     },
     setDots(on) {
       pass.uniforms.dots.value = on ? 1 : 0;
+      pass.uniforms.emptyColor.value.set(on ? '#05070b' : PALETTE.navy); // near-black sky behind the dots
     },
     setCell(css, dpr) {
       const cellPx = Math.max(4, Math.round(css * dpr));

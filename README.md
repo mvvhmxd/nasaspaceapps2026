@@ -60,7 +60,7 @@ The offline pipeline that produces `public/sites/<id>.json` is in [`pipeline/`](
 - **Battery numbers are game values,** balanced for play. They are not from a real lander or rover.
 - **Ice prospects are chosen by rule:** the deepest reachable low ground in each 10 km map. They are prospects, not known ice deposits.
 - **Rover lighting is approximate:** local terrain within the 10 km map plus the lander's far horizon.
-- **Surface view:** the Sun and Earth are at their true positions but drawn 3× their true size. Beyond the 10 km map the horizon is a silhouette built from the site's real horizon as seen from the lander. Earth's face is a drawing, not an image, and shows no phase.
+- **Surface view:** the Sun and Earth are at their true positions but drawn larger than life (the Sun 4×, the Earth 8×). The camera rides about 220 m above and behind the rover, exposed like a camera (sunlit ground white, shadows black). Beyond the 10 km map the horizon is a silhouette built from the site's real horizon as seen from the lander. Earth's face is a drawing, not an image, and shows no phase.
 - **The Sun is a point.** It counts as up when its centre clears the horizon; the real disc is about 0.5° wide, so real sunrise is gradual.
 - **Terrain grid is 40 m** and the lander's eye is 2 m above it. Boulders and small bumps are not modelled.
 - **On-map shadows are a visual aid.** They use only the 10 km around the site. The SUNLIT / IN SHADOW status is the calculated truth and uses the 250 km horizon.

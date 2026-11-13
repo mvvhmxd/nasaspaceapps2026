@@ -108,6 +108,7 @@ export default function MissionHud({ sim, events, playing, speed, speeds, forceS
         <button className={view === 'surface' ? 'on' : ''} aria-pressed={view === 'surface'} onClick={onView}>
           {view === 'surface' ? 'Map view' : 'Surface view'} (V)
         </button>
+        <span className="dim small">H hides panels</span>
         <div className="progress" aria-hidden="true"><span style={{ width: `${(100 * elapsed) / cfg.missionHours}%` }} /></div>
         <button onClick={onAbort}>Abort to planner</button>
       </div>

@@ -176,3 +176,6 @@ table.stats thead td { color: rgba(201, 206, 214, 0.75); font-size: 12px; }
 .field input[type='range'] { accent-color: var(--amber); width: 100%; }
 fieldset.field { border: 0; padding: 0; }
 .choices { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* H key in a mission: hide the panels to see the view */
+.nohud .stack-left, .nohud .hud.top-right, .nohud .hud.feed { display: none; }
