@@ -1,6 +1,7 @@
 // Pure helpers for the screens. No React, no DOM. All truth comes from src/sim/.
 import { stateAt } from '../sim/visibility.js';
 import { previewStats } from '../sim/planner.js';
+import { bestStart } from '../sim/solver.js';
 
 /** Hours until `key` ('sunlit' | 'earthVisible') next flips after `hour`; null if it never does. */
 export function nextChange(site, hour, key) {
@@ -57,4 +58,18 @@ export function bestPerRow(stats) {
 export function utcLabel(site, hour) {
   const t = new Date(Date.parse(site.series.startUtc) + hour * site.series.stepHours * 3600e3);
   return t.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+
+/**
+ * Best automatic-plan result over every site and selectable landing day of a mission.
+ * Returns { siteId, day, score, alive }.
+ */
+export function bestPlan(sites, config) {
+  let best = null;
+  for (const site of sites) {
+    const b = bestStart(site, config, 24); // stride 24 h = the days the planner offers
+    const better = !best || (b.alive && !best.alive) || (b.alive === best.alive && b.score > best.score);
+    if (better) best = { siteId: site.id, day: b.startHour / 24, score: b.score, alive: b.alive };
+  }
+  return best;
 }

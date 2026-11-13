@@ -1,5 +1,6 @@
-// Site and date planner: pick the landing day, preview it, pin up to 3 to compare.
+// Site and date planner: pick the site and landing day, preview, pin up to 3 to compare.
 import { bestPerRow, utcLabel } from './gameHelpers.js';
+import { SkyBadge } from './Screens.jsx';
 
 const ROWS = [
   ['sunlitPct', 'Sunlit', (v) => `${v.toFixed(0)}%`],
@@ -9,19 +10,40 @@ const ROWS = [
   ['hoursToFirstSunset', 'First sunset in', (v) => (v === null ? 'none' : `${v} h`)],
   ['hoursToFirstEarthset', 'First Earthset in', (v) => (v === null ? 'none' : `${v} h`)],
 ];
+const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
 
-export default function Planner({ site, stats, day, minDay, pinned, slip, countdown, onDay, onPin, onUnpin, onLand, onBack }) {
+export default function Planner({ mission, sites, site, statsBySite, day, minDay, pinned, slip, countdown, onSite, onDay, onPin, onUnpin, onLand, onBack }) {
+  const stats = statsBySite[site.id];
   const s = stats[day];
-  const best = bestPerRow(pinned.map((d) => stats[d]));
+  const days = mission.config.missionHours / 24;
+  const pinStats = pinned.map((p) => statsBySite[p.siteId][p.day]);
+  const best = bestPerRow(pinStats);
+  const here = { siteId: site.id, day };
+  const isPinned = pinned.some((p) => samePin(p, here));
+  const siteName = (id) => sites.find((x) => x.id === id).name.replace('Training site ', '');
   return (
     <div className="panel planner" role="dialog" aria-label="Landing planner">
-      <div className="kicker">Plan &middot; {site.name}</div>
+      <div className="kicker">Plan &middot; {mission.name}</div>
       {slip > 0 && (
         <div className="alert" role="alert">
           &#9888; LAUNCH SLIP: +{slip} days. Earliest landing is now day {minDay + 1}.
           {countdown !== null && <> Replan within <b>{countdown} s</b> or the slipped date is used.</>}
         </div>
       )}
+      {sites.length > 1 && (
+        <div className="tabs" role="tablist" aria-label="Landing site">
+          {sites.map((x) => (
+            <button key={x.id} role="tab" aria-selected={x.id === site.id} className={x.id === site.id ? 'on' : ''} onClick={() => onSite(x.id)}>
+              {x.name.replace('Training site ', '')}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="siteinfo">
+        <span className="title">{site.name}</span> <span className="dim">{site.lat}&deg;, {site.lon}&deg; E</span>
+        <SkyBadge site={site} />
+        <div className="dim small">{site.blurb}</div>
+      </div>
       <div className="strip" role="radiogroup" aria-label="Landing day">
         {stats.map((d, i) => (
           <button
@@ -39,7 +61,7 @@ export default function Planner({ site, stats, day, minDay, pinned, slip, countd
           </button>
         ))}
       </div>
-      <div className="dim small">Bar height = sunlit share of the 14-day mission (amber). Underline = Earth in view (teal). ! = darkness longer than the battery survives asleep.</div>
+      <div className="dim small">Bar height = sunlit share of the {days}-day mission (amber). Underline = Earth in view (teal). ! = darkness longer than the battery survives asleep.</div>
 
       <div className="cards">
         <div className="card">
@@ -50,31 +72,31 @@ export default function Planner({ site, stats, day, minDay, pinned, slip, countd
           </tbody></table>
           {s.exceedsSleepBudget && <div className="dark">&#9888; Darkness exceeds the sleep budget. You can still land.</div>}
           <div className="row">
-            <button onClick={() => onPin(day)} disabled={pinned.includes(day) || pinned.length >= 3}>
-              {pinned.includes(day) ? 'Pinned' : pinned.length >= 3 ? 'Tray full' : 'Pin to compare'}
+            <button onClick={() => onPin(here)} disabled={isPinned || pinned.length >= 3}>
+              {isPinned ? 'Pinned' : pinned.length >= 3 ? 'Tray full' : 'Pin to compare'}
             </button>
           </div>
         </div>
-        {pinned.map((d, i) => (
-          <div className="card pin" key={d}>
-            <div className="title">Pinned: day {d + 1}</div>
+        {pinned.map((p, i) => (
+          <div className="card pin" key={`${p.siteId}-${p.day}`}>
+            <div className="title">Pinned: {siteName(p.siteId)}, day {p.day + 1}</div>
             <table className="stats"><tbody>
               {ROWS.map(([k, label, fmt]) => (
                 <tr key={k} className={pinned.length > 1 && best[k] === i ? 'best' : ''}>
-                  <th>{label}</th><td>{fmt(stats[d][k])}{pinned.length > 1 && best[k] === i ? ' ✓' : ''}</td>
+                  <th>{label}</th><td>{fmt(pinStats[i][k])}{pinned.length > 1 && best[k] === i ? ' ✓' : ''}</td>
                 </tr>
               ))}
             </tbody></table>
             <div className="row">
-              <button onClick={() => onDay(d)} disabled={d < minDay}>Select</button>
-              <button onClick={() => onUnpin(d)}>Remove</button>
+              <button onClick={() => { onSite(p.siteId); onDay(p.day); }} disabled={p.day < minDay}>Select</button>
+              <button onClick={() => onUnpin(p)}>Remove</button>
             </div>
           </div>
         ))}
       </div>
       <div className="row">
         {countdown === null && <button onClick={onBack}>Back</button>}
-        <button className="primary" onClick={onLand}>Land on day {day + 1}</button>
+        <button className="primary" onClick={onLand}>Land at {siteName(site.id)}, day {day + 1}</button>
       </div>
     </div>
   );

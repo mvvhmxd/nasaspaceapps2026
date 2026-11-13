@@ -1,34 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadSite } from './data/loadSite.js';
 import { stateAt } from './sim/visibility.js';
-import { SIM_CONFIG } from './sim/config.js';
 import { initialState, advance, MODES } from './sim/survival.js';
-import { bestStart } from './sim/solver.js';
 import { createSurfaceScene } from './render/scene.js';
-import { MISSIONS } from './game/missions.js';
-import { dayStats, slipDay, starsFor, utcLabel } from './ui/gameHelpers.js';
-import { Title, Brief, Help, Debrief } from './ui/Screens.jsx';
+import { MISSIONS, missionById } from './game/missions.js';
+import { loadProgress, saveProgress, recordStars, nextMissionId, isUnlocked } from './game/progress.js';
+import { dayStats, slipDay, starsFor, bestPlan, utcLabel } from './ui/gameHelpers.js';
+import { Title, MissionSelect, Brief, Help, Credits, Debrief, SkyBadge } from './ui/Screens.jsx';
 import Planner from './ui/Planner.jsx';
 import MissionHud, { MissionStatus } from './ui/MissionHud.jsx';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
 const TICK_MS = 500;
-const mission = MISSIONS[0];
+const ALL_SITE_IDS = [...new Set(MISSIONS.flatMap((m) => m.siteIds))];
 const sleepPlan = () => MODES.ASLEEP;
+const params = new URLSearchParams(location.search);
+const REPLAN_OVERRIDE = Number(params.get('replan')) || null; // ?replan=5 shortens the slip countdown for demos
 
 export default function App() {
   const canvasRef = useRef(null);
   const sceneRef = useRef(null);
   const simRef = useRef(null);
   const eventsRef = useRef([]);
-  const [site, setSite] = useState(null);
+  const [sites, setSites] = useState(null); // { id: site }
   const [error, setError] = useState(null);
-  const [screen, setScreen] = useState('title'); // title | brief | planner | surface | debrief
-  const [help, setHelp] = useState(false);
+  const [screen, setScreen] = useState('title'); // title | missions | brief | planner | surface | debrief
+  const [overlay, setOverlay] = useState(null); // 'help' | 'credits' | null
+  const [progress, setProgress] = useState(loadProgress);
+  const [missionId, setMissionId] = useState(MISSIONS[0].id);
+  const [siteId, setSiteId] = useState(MISSIONS[0].siteIds[0]);
   const [day, setDay] = useState(0);
   const [minDay, setMinDay] = useState(0);
   const [pinned, setPinned] = useState([]);
-  const [slip, setSlip] = useState(0); // days of launch slip applied (0 = not yet)
+  const [slip, setSlip] = useState(0); // days of launch slip applied (0 = none yet)
   const [slipDone, setSlipDone] = useState(false);
   const [countdown, setCountdown] = useState(null);
   const [sim, setSim] = useState(null);
@@ -41,13 +45,22 @@ export default function App() {
   const [renderBlocked, setRenderBlocked] = useState(null);
   const [ascii, setAsciiState] = useState({ on: true, reason: 'user' });
 
-  useEffect(() => {
-    loadSite(mission.siteId).then(setSite, (e) => setError(String(e)));
-  }, []);
+  const mission = missionById(missionId);
+  const cfg = mission.config;
+  const site = sites?.[siteId] ?? null;
 
+  function loadAll() {
+    setError(null);
+    Promise.all(ALL_SITE_IDS.map(loadSite)).then(
+      (list) => setSites(Object.fromEntries(list.map((s) => [s.id, s]))),
+      (e) => setError(String(e)),
+    );
+  }
+  useEffect(loadAll, []);
+
+  // One map per site: rebuilt when the selected site changes.
   useEffect(() => {
     if (!site) return;
-    const params = new URLSearchParams(location.search);
     const s = createSurfaceScene(canvasRef.current, site, {
       onFps: setFps,
       onAsciiChange: setAsciiState,
@@ -55,12 +68,15 @@ export default function App() {
     });
     if (params.get('ascii') === '0') s.setAscii(false);
     sceneRef.current = s;
-    return () => s.dispose();
+    return () => { s.dispose(); sceneRef.current = null; };
   }, [site]);
 
-  const stats = useMemo(() => (site ? dayStats(site, SIM_CONFIG.missionHours) : []), [site]);
-  // Stride 24 h: the solver only considers landing hours the planner can actually select.
-  const best = useMemo(() => (site ? bestStart(site, SIM_CONFIG, 24) : null), [site]);
+  const missionSites = useMemo(() => (sites ? mission.siteIds.map((id) => sites[id]) : []), [sites, mission]);
+  const statsBySite = useMemo(
+    () => Object.fromEntries(missionSites.map((s) => [s.id, dayStats(s, cfg.missionHours, cfg)])),
+    [missionSites, cfg],
+  );
+  const best = useMemo(() => (missionSites.length ? bestPlan(missionSites, cfg) : null), [missionSites, cfg]);
 
   // The hour shown on the map: the sim's hour while flying, else the planned landing hour.
   const inMission = (screen === 'surface' || screen === 'debrief') && sim;
@@ -74,11 +90,30 @@ export default function App() {
     sceneRef.current.setLanderInShadow(!sky.sunlit); // the sim decides
   }, [site, sky?.hour]);
 
+  function resetPlan(id) {
+    setSiteId(missionById(id).siteIds[0]);
+    setDay(0);
+    setMinDay(0);
+    setPinned([]);
+    setSlip(0);
+    setSlipDone(false);
+    setCountdown(null);
+    setPlaying(false);
+    setSim(null);
+  }
+
+  function pickMission(id) {
+    if (!isUnlocked(progress, id)) return;
+    setMissionId(id);
+    resetPlan(id);
+    setScreen('brief');
+  }
+
   function startMission(landingDay) {
-    const s = initialState(SIM_CONFIG, landingDay * 24);
+    const s = initialState(cfg, landingDay * 24);
     simRef.current = s;
-    setSim(s);
     eventsRef.current = [];
+    setSim(s);
     setEvents([]);
     setForceSleep(false);
     setCountdown(null);
@@ -87,14 +122,14 @@ export default function App() {
   }
 
   function land() {
-    if (!slipDone) {
+    if (mission.slipDays > 0 && !slipDone) {
       setSlipDone(true);
-      const slipped = slipDay(day, mission.slipDays, site, SIM_CONFIG.missionHours);
+      const slipped = slipDay(day, mission.slipDays, site, cfg.missionHours);
       if (slipped > day) {
         setSlip(slipped - day);
         setMinDay(slipped);
         setDay(slipped);
-        setCountdown(mission.replanSeconds);
+        setCountdown(REPLAN_OVERRIDE ?? mission.replanSeconds);
         return; // back to the planner with the clock running
       }
     }
@@ -107,20 +142,21 @@ export default function App() {
     setMinDay(0);
     setCountdown(null);
     setPlaying(false);
+    setSim(null);
     setScreen('planner');
   }
 
-  // Replan countdown after a launch slip. Paused while "How it works" is open.
+  // Replan countdown after a launch slip. Paused while an overlay is open.
   useEffect(() => {
-    if (screen !== 'planner' || countdown === null || help) return;
+    if (screen !== 'planner' || countdown === null || overlay) return;
     if (countdown <= 0) { startMission(day); return; }
     const id = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(id);
-  }, [screen, countdown, help, day]);
+  }, [screen, countdown, overlay, day]);
 
   // Survival clock: every tick advances `speed` hours, one hour at a time inside advance().
   useEffect(() => {
-    if (screen !== 'surface' || !playing || help || !site) return;
+    if (screen !== 'surface' || !playing || overlay || !site) return;
     const id = setInterval(() => {
       const r = advance(site, simRef.current, speed, forceSleep ? sleepPlan : undefined);
       simRef.current = r.state;
@@ -130,62 +166,64 @@ export default function App() {
         setEvents(eventsRef.current);
       }
       if (r.state.done) {
+        const stars = starsFor(r.state, best.score, cfg.starThresholds);
         setPlaying(false);
         setResult({
-          state: r.state,
-          events: eventsRef.current,
-          best,
-          bestDay: Math.floor(best.startHour / 24),
-          landingDay: r.state.startHour / 24,
-          slip,
-          stars: starsFor(r.state, best.score, SIM_CONFIG.starThresholds),
+          state: r.state, events: eventsRef.current, mission, stars, best, slip,
+          siteName: site.name, bestSiteName: sites[best.siteId].name, landingDay: r.state.startHour / 24,
         });
+        setProgress((p) => { const next = recordStars(p, mission.id, stars); saveProgress(next); return next; });
         setScreen('debrief');
       }
     }, TICK_MS);
     return () => clearInterval(id);
-  }, [screen, playing, help, site, speed, forceSleep, best, slip]);
+  }, [screen, playing, overlay, site, speed, forceSleep, best, slip, mission, cfg, sites]);
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape' && help) setHelp(false);
-      if (screen !== 'surface' || help || e.target.closest?.('input, a')) return;
-      if (e.code === 'Space') { e.preventDefault(); setPlaying((p) => !p); }
-      if (e.key === 's' || e.key === 'S') setForceSleep((f) => !f);
+      if (e.key === 'Escape' && overlay) setOverlay(null);
+      if (screen !== 'surface' || overlay || e.target.closest?.('input, a')) return;
+      if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) setPlaying((p) => !p); }
+      if ((e.key === 's' || e.key === 'S') && !e.repeat) setForceSleep((f) => !f);
     };
+    // A focused button also "clicks" on Space key-up; stop that so Space toggles once.
+    const onKeyUp = (e) => { if (screen === 'surface' && !overlay && e.code === 'Space') e.preventDefault(); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [screen, help]);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+  }, [screen, overlay]);
 
   if (error) {
     return (
       <div className="msg" role="alert">
-        Could not load site: {error} <button onClick={() => location.reload()}>Retry</button>
+        Could not load the landing sites: {error} <button onClick={loadAll}>Retry</button>
       </div>
     );
   }
 
   const agree = sky && renderBlocked !== null ? renderBlocked === !sky.sunlit : null;
+  const next = nextMissionId(mission.id);
+  const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
 
   return (
     <div className="app">
       <canvas ref={canvasRef} className="view" aria-label="Top-down terrain map of the landing site" />
-      {!site && <div className="msg">Loading site&hellip;</div>}
+      {!sites && <div className="msg">Loading landing sites&hellip;</div>}
       {site && sky && (
         <>
           {(screen === 'planner' || screen === 'surface') && (
             <div className="stack-left">
-            <div className="hud static">
-              <div className="title">{site.name}</div>
-              {site.illustrative && <div className="badge">Illustrative</div>}
-              <div>{utcLabel(site, sky.hour)}</div>
-              <div>Sun az {sky.sunAz.toFixed(1)}&deg; el {sky.sunEl.toFixed(2)}&deg; &middot; ridge {sky.sunMask.toFixed(2)}&deg;</div>
-              <div className={sky.sunlit ? 'lit' : 'dark'}>{sky.sunlit ? '☀ SUNLIT' : '● IN SHADOW'}</div>
-              <div className={sky.earthVisible ? 'comms' : 'dark'}>
-                {sky.earthVisible ? '◆ EARTH IN VIEW' : '◇ NO EARTH CONTACT'} (el {sky.earthEl.toFixed(1)}&deg;)
+              <div className="hud static">
+                <div className="title">{site.name}</div>
+                <SkyBadge site={site} />
+                <div>{utcLabel(site, sky.hour)}</div>
+                <div>Sun az {sky.sunAz.toFixed(1)}&deg; el {sky.sunEl.toFixed(2)}&deg; &middot; ridge {sky.sunMask.toFixed(2)}&deg;</div>
+                <div className={sky.sunlit ? 'lit' : 'dark'}>{sky.sunlit ? '☀ SUNLIT' : '● IN SHADOW'}</div>
+                <div className={sky.earthVisible ? 'comms' : 'dark'}>
+                  {sky.earthVisible ? '◆ EARTH IN VIEW' : '◇ NO EARTH CONTACT'} (el {sky.earthEl.toFixed(1)}&deg;)
+                </div>
               </div>
-            </div>
-            {screen === 'surface' && sim && <MissionStatus site={site} sim={sim} sky={sky} forceSleep={forceSleep} />}
+              {screen === 'surface' && sim && <MissionStatus site={site} sim={sim} sky={sky} forceSleep={forceSleep} />}
             </div>
           )}
           <div className="hud top-right">
@@ -200,23 +238,26 @@ export default function App() {
               render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}
             </div>
-            <button onClick={() => setHelp(true)}>How it works</button>
+            <button onClick={() => setOverlay('help')}>How it works</button>
           </div>
 
-          {screen === 'title' && <Title site={site} onStart={() => setScreen('brief')} onHelp={() => setHelp(true)} />}
-          {screen === 'brief' && <Brief mission={mission} onBack={() => setScreen('title')} onNext={() => setScreen('planner')} />}
-          {screen === 'planner' && stats.length > 0 && (
+          {screen === 'title' && (
+            <Title onStart={() => setScreen('missions')} onHelp={() => setOverlay('help')} onCredits={() => setOverlay('credits')} />
+          )}
+          {screen === 'missions' && <MissionSelect progress={progress} onPick={pickMission} onBack={() => setScreen('title')} />}
+          {screen === 'brief' && (
+            <Brief mission={mission} index={MISSIONS.indexOf(mission)} onBack={() => setScreen('missions')} onNext={() => setScreen('planner')} />
+          )}
+          {screen === 'planner' && (
             <Planner
-              site={site} stats={stats} day={day} minDay={minDay} pinned={pinned} slip={slip} countdown={countdown}
-              onDay={setDay}
-              onPin={(d) => setPinned((p) => (p.includes(d) || p.length >= 3 ? p : [...p, d]))}
-              onUnpin={(d) => setPinned((p) => p.filter((x) => x !== d))}
+              mission={mission} sites={missionSites} site={site} statsBySite={statsBySite}
+              day={day} minDay={minDay} pinned={pinned} slip={slip} countdown={countdown}
+              onSite={setSiteId} onDay={setDay}
+              onPin={(p) => setPinned((list) => (list.some((x) => samePin(x, p)) || list.length >= 3 ? list : [...list, p]))}
+              onUnpin={(p) => setPinned((list) => list.filter((x) => !samePin(x, p)))}
               onLand={land}
               onBack={() => setScreen('brief')}
             />
-          )}
-          {screen === 'planner' && stats.length === 0 && (
-            <div className="panel center" role="alert">This site&rsquo;s data is shorter than one mission. No landing day is available.</div>
           )}
           {screen === 'surface' && sim && (
             <MissionHud
@@ -227,9 +268,17 @@ export default function App() {
             />
           )}
           {screen === 'debrief' && result && (
-            <Debrief result={result} onRetry={retry} onTitle={() => { retry(); setScreen('title'); }} onHelp={() => setHelp(true)} />
+            <Debrief
+              result={result}
+              onRetry={retry}
+              onNext={result.stars >= 1 && next ? () => pickMission(next) : null}
+              onMissions={() => { resetPlan(mission.id); setScreen('missions'); }}
+              onHelp={() => setOverlay('help')}
+            />
           )}
-          {help && <><div className="scrim" onClick={() => setHelp(false)} /><Help site={site} onClose={() => setHelp(false)} /></>}
+          {overlay && <div className="scrim" onClick={() => setOverlay(null)} />}
+          {overlay === 'help' && <Help onClose={() => setOverlay(null)} />}
+          {overlay === 'credits' && <Credits sites={Object.values(sites)} onClose={() => setOverlay(null)} />}
         </>
       )}
     </div>

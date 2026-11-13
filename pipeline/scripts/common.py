@@ -56,7 +56,7 @@ def az_el(vec, east, north, up):
 def hourly_az_el(spice, target, lat_deg, lon_deg, start_utc, hours, step_hours=1, alt_km=0.0):
     """Apparent az/el of `target` ('SUN' or 'EARTH') from a lunar surface site, one row per step."""
     pos, east, north, up = site_vectors(lat_deg, lon_deg, alt_km)
-    et0 = spice.str2et(start_utc)
+    et0 = spice.str2et(start_utc.rstrip("Z"))  # SPICE does not accept a trailing Z
     out = np.empty((hours, 2))
     for i in range(hours):
         et = et0 + i * step_hours * 3600.0

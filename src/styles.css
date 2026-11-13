@@ -117,3 +117,16 @@ table.stats tr.best td { color: var(--amber); }
 @media (max-width: 700px) {
   .hud.feed { display: none; }
 }
+
+/* ---- Campaign ---- */
+.badge.teal { border-color: var(--teal); color: var(--teal); }
+.badge + .badge { margin-left: 6px; }
+.starrow { font-size: 18px; letter-spacing: 2px; }
+.missions { display: grid; gap: 8px; margin: 10px 0; }
+button.mission { display: grid; gap: 2px; text-align: left; padding: 10px 12px; }
+button.mission .title { font-size: 16px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.tabs button[aria-selected='true'] { border-color: var(--amber); color: var(--amber); }
+.siteinfo { margin: 6px 0; }
+.siteinfo .badge { margin-left: 8px; }
+table.stats thead td { color: rgba(201, 206, 214, 0.75); font-size: 12px; }
