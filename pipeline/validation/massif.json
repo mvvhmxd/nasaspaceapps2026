@@ -1,0 +1,47 @@
+{
+  "id": "massif",
+  "lat": -88.665,
+  "lon": 291.53,
+  "startUtc": "2027-03-01T00:00:00Z",
+  "hours": 1440,
+  "toleranceDeg": 0.02,
+  "spice": {
+    "method": "SPICE spkcpo, topocentric ENU on a sphere",
+    "kernels": [
+      "de440s.bsp",
+      "moon_de440_250416.tf",
+      "moon_pa_de440_200625.bpc",
+      "naif0012.tls",
+      "pck00011.tpc"
+    ],
+    "frame": "MOON_ME",
+    "aberration": "LT+S",
+    "radiusKm": 1737.4,
+    "azimuth": "degrees clockwise from north",
+    "refraction": "none"
+  },
+  "horizons": {
+    "api": "https://ssd.jpl.nasa.gov/api/horizons.api",
+    "center": "coord@301",
+    "quantities": 4,
+    "apparent": "AIRLESS"
+  },
+  "checkedUtc": "2026-11-13T20:07Z",
+  "bodies": {
+    "sun": {
+      "maxSeparationDeg": 7e-05,
+      "meanSeparationDeg": 4e-05,
+      "maxElevationDiffDeg": 5e-05,
+      "worstHour": 698,
+      "pass": true
+    },
+    "earth": {
+      "maxSeparationDeg": 7e-05,
+      "meanSeparationDeg": 4e-05,
+      "maxElevationDiffDeg": 5e-05,
+      "worstHour": 143,
+      "pass": true
+    }
+  },
+  "pass": true
+}

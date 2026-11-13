@@ -20,7 +20,8 @@ The ASCII pass is a `ShaderPass` between `RenderPass` and `OutputPass` (linear s
 ## Data and config
 - **Config constants:** `SUN_DISTANCE` = 60,000 m (light placement); shadow map 4096², `normalBias = spacingM × 1.2`; lander marker radii 70–175 m (not to scale, see Deviations); `SHARP_LAYER` = 1; `FPS_FLOOR` = 30 (three readings below it switch the pass off).
 - **ASCII uniforms** (`ascii.js`): `cell` = 10 CSS px × pixel ratio (design.md "ASCII cell size"), 32 glyphs, `fill` 0.45, `saturation` 1.4, `gain` 1.6, `duotone` 0.5, contrast curve 0.04–0.8, grade colours from `PALETTE.navy` (×2.2) and `PALETTE.amber`.
-- **URL flags:** `?h=<hour>`, `?cell=<px>`, `?ascii=0`.
+- **URL flags:** `?site=<id>` (default `connecting-ridge`), `?h=<hour>`, `?cell=<px>`, `?ascii=0`.
+- **Far terrain:** when `stateAt` says terrain beyond the crop hides the Sun (`sunBehindFarTerrain`), `setSun` switches the Sun light off and the HUD says "IN SHADOW (far terrain)"; the render check compares against the crop's own horizon (`nearMask`).
 - **Persistence:** none.
 
 ## Deviations from design
@@ -32,3 +33,4 @@ The ASCII pass is a `ShaderPass` between `RenderPass` and `OutputPass` (linear s
 ## History
 - 2026-11-13: M1 scene proof implemented (plain shading, top-down only).
 - 2026-11-13: M1b ASCII pass implemented (`ascii.js`), lander on a sharp layer, `A` toggle and low-fps fallback.
+- 2026-11-13: real site (Connecting Ridge) is the default; far-terrain shadow handling; the sim samples the mesh's own triangles and checks every mesh-edge crossing, so the render check is exact.

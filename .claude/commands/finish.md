@@ -19,4 +19,4 @@ Stop if a step fails. Never commit, push or open a PR without the user's OK.
    Use the user's git identity, with no AI co-author lines. Wait for OK.
 8. **Push + draft PR.** `git push -u origin <branch>`. With `gh`: `gh pr create --draft`, reviewer =
    owner (dev4) and dev1. Body: What / Files changed / Milestone / Reviewer must decide / Tests and
-   build / Browser check. Without `gh`: print the title, body and compare URL. Never merge.
+   build / Browser check. Without `gh`: print the title, body and compare URL. Only dev1 or dev4 merge, and only with the user's OK.

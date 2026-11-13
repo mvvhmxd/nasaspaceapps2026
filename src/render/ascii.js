@@ -76,6 +76,8 @@ const AsciiShader = {
     contrastHi: { value: 0.8 },
     shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
     sunColor: { value: new THREE.Color(PALETTE.amber) },
+    emptyColor: { value: new THREE.Color(PALETTE.navy) }, // drawn where there is no terrain
+    dots: { value: 0 }, // 1 = halftone dots sized by brightness (surface view) instead of glyphs
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -98,6 +100,8 @@ const AsciiShader = {
     uniform float contrastHi;
     uniform vec3 shadowColor;
     uniform vec3 sunColor;
+    uniform vec3 emptyColor;
+    uniform float dots;
     varying vec2 vUv;
 
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -105,7 +109,12 @@ const AsciiShader = {
     void main() {
       vec2 cellIndex = floor(gl_FragCoord.xy / cell);
       vec2 cellUv = (cellIndex + 0.5) * cell / resolution;
-      vec3 scene = texture(tDiffuse, cellUv).rgb;
+      vec4 texel = texture(tDiffuse, cellUv);
+      if (texel.a < 0.5) { // beyond the edge of the terrain: no glyphs
+        gl_FragColor = vec4(emptyColor, 1.0);
+        return;
+      }
+      vec3 scene = texel.rgb;
 
       // Linear -> perceptual, then a contrast curve so lit ground is dense and
       // shadow still shows sparse glyphs.
@@ -116,6 +125,25 @@ const AsciiShader = {
       vec2 local = fract(gl_FragCoord.xy / cell);
       vec2 glyphUv = vec2((idx + local.x) / glyphCount, local.y);
       float ink = texture(tGlyph, glyphUv).r;
+
+      if (dots > 0.5) {
+        // Halftone: one round dot per cell, radius grows with brightness, keeps the scene's own colour.
+        // Dots sized by brightness. Each dot takes the colour of the light that reaches it, so the
+        // ground reads as game state: amber = sunlight (charging), blue = shadow (draining),
+        // white = the rover's floodlight. Coloured things (Earth) keep their own colour.
+        float dl = smoothstep(0.03, 0.85, y);
+        float radius = 0.52 * sqrt(dl);
+        float edge = 1.0 / cell;
+        float dotInk = (1.0 - smoothstep(radius - edge, radius + edge, length(local - 0.5))) * step(0.02, dl);
+        float maxc = max(scene.r, max(scene.g, scene.b));
+        float minc = min(scene.r, min(scene.g, scene.b));
+        float chroma = (maxc - minc) / max(maxc, 0.001);
+        vec3 hue = scene / max(maxc, 0.001);
+        hue = mix(vec3(dot(hue, LUMA)), hue, 1.0 + 0.6 * (1.0 - chroma)); // push faint tints further apart
+        vec3 dotColor = clamp(hue, 0.0, 1.0) * mix(0.62, 1.0, dl);
+        gl_FragColor = vec4(mix(emptyColor, dotColor, dotInk), 1.0);
+        return;
+      }
 
       // Colour: boosted scene colour blended with the palette grade.
       vec3 grey = vec3(dot(scene, LUMA));
@@ -142,6 +170,10 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
     ramp: '',
     setSize(w, h) {
       pass.uniforms.resolution.value.set(w, h);
+    },
+    setDots(on) {
+      pass.uniforms.dots.value = on ? 1 : 0;
+      pass.uniforms.emptyColor.value.set(on ? '#060a1c' : PALETTE.navy); // deep navy behind the dots
     },
     setCell(css, dpr) {
       const cellPx = Math.max(4, Math.round(css * dpr));

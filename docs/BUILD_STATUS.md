@@ -3,27 +3,25 @@
 **Updated:** 2026-11-13
 
 ## Current state
-- **On `main`:** the original single-screen surface view (illustrative demo site). Nothing below is merged yet.
-- **In open draft PRs:** a three-mission campaign that runs on real NASA data.
-  - Terrain and horizons: NASA LOLA (`LDEM_85S_40M`, `LDEM_80S_80M`).
-  - Sun and Earth: SPICE DE440, checked against JPL Horizons (largest difference 0.00007° at every site).
-  - Screens: title, mission select, briefing, planner, task schedule, survival, debrief, settings, how it works, data and credits.
-- **Renderer decision:** not formally approved. The existing three.js view is already top-down with the coloured ASCII pass, so the work so far kept it and did not migrate to Phaser. Dev 1 to confirm (see D-008 in `docs/GDD.md` on the campaign branch).
-- **The M0 audit in `FIRST_SESSION_PROMPT.md` was not run as a separate step.** Work went ahead on stacked branches instead; treat the PR review as the checkpoint.
+- **On `main` (merged 2026-11-13, PR #8):** the full game on real NASA data.
+  - Dev 1's Connecting Ridge (5 m LOLA terrain, sky from JPL Horizons) is used in all three missions.
+  - `pipeline/` sites (SPICE sky checked against Horizons at 0.00007°): Polar spur, Massif shoulder, Low rise. All sites share one window, 60 days from 2027-03-01.
+  - Screens: title, mission select, briefing, planner, task schedule, survival with rover and surface view, debrief, settings, how it works, data and credits.
+- **Renderer:** three.js kept (no Phaser). Map view is top-down with ASCII glyphs; the rover's surface view (V) uses halftone dots.
+- **The M0 audit in `FIRST_SESSION_PROMPT.md` was not run as a separate step.**
 
-## Open pull requests and merge order
-1. #2 `feat/dev3-setup`: pipeline scaffold and the working sim.
-2. #6 `feat/dev4-full-campaign`: the campaign on real data. Contains everything in #4 and #5, which can then be closed.
-3. #3 `chore/team-onboarding`: this kit and the team guide. Needs a conflict fix on `CLAUDE.md` and the two commands after #2 merges.
+## Pull requests
+- Merged: #8 (contains #2, #4, #5, #6, #7, which were closed as included).
+- This PR (#3): team onboarding and the game kit.
 
-## Verified commands (on `feat/dev4-full-campaign`, 2026-11-13)
+## Verified commands (on `main` after PR #8, 2026-11-13)
 | Command | Result |
 |---|---|
-| `npm test` | 32 passed |
+| `npm test` | 46 passed |
 | `npm run build` | succeeds |
 | `pytest pipeline/tests` | 12 passed |
-| `pipeline/run_all.sh` | builds `ridge`, `spur`, `knoll`, `hollow`; every Horizons check passes |
-| Browser (Chromium, 1366×768) | campaign flows played by an automated script with no console errors; see PR #6 for exactly what was and was not covered |
+| `pipeline/run_all.sh` | builds `spur`, `massif`, `hollow`; every Horizons check passes |
+| Browser (Chromium, 1366×768) | missions 1 and 2 won, mission 3 played through a slip, no console errors; see PR #8 for what was not covered |
 
 ## Milestones
 - [ ] M0 Repository recovery and audit: skipped as a formal step (see above)
@@ -34,9 +32,8 @@
 - [~] M5 Audio, accessibility, polish, and QA: event sounds, settings, keyboard controls and text-plus-icon states done; no music, no reduced-motion setting, no human playtest
 
 ## Blockers and decisions waiting on Dev 1
-- Review and merge the PRs in the order above.
-- Confirm or replace the four sites and the window (60 days from 2026-12-01). They are the team's own picks from `pipeline/scripts/candidates.py`, not official landing sites.
-- Confirm the top-down-only view and no Phaser migration.
+- Which pipeline the team keeps (D-006 in `docs/GDD.md`), and the three `pipeline/` sites (D-008).
+- The rover's second camera (D-009) and the dot style in the surface view.
 - D-008 to D-010 in `docs/DECISIONS.md`, and the open items in `pipeline/NOTES_FOR_TEAM.md`.
 
 ## Known gaps
@@ -46,5 +43,5 @@
 - `docs/ASSETS_AND_LICENSES.md` and `public/assets/credits/ASSET_CREDITS.md` are not filled in. The game currently ships no external art or audio files; data sources are credited in the README and the in-game credits screen.
 
 ## Next task
-- Dev 1: review #2 and #6.
-- Then: a human playtest of all three missions on a team laptop with ASCII on, and a public deployment.
+- A human playtest of all three missions on a team laptop with ASCII on, including a rover ice run.
+- Public deployment, slides and demo video.

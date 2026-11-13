@@ -20,16 +20,15 @@ Suggest `/start` at the beginning of work and `/finish` at the end.
 ### dev1 – Lead / Integrator / Game Director (Mahmoud)
 - Owns: `docs/` (GAME_SPEC, TECHNICAL_PLAN, DECISIONS, BUILD_STATUS, ASSETS_AND_LICENSES),
   `CLAUDE.md`, `.claude/`, `package.json`, `package-lock.json`,
-  `src/game/config/campaign.js`, `src/game/config/missions.js`, PR review and merging.
+  `scripts/pipeline/` (5 m LOLA + Horizons pipeline, Connecting Ridge), PR review and merging.
 - Does: milestone approval (one at a time), decisions in `docs/DECISIONS.md`, site and date picks,
   campaign/mission design, README/slides/video, AI-use disclosure, organizer questions.
 - Skills: `game-director`, `asset-license-audit`, `qa-playtest`.
 - Judging focus: Presentation, Relevance.
 
 ### dev2 – Frontend / Renderer
-- Owns: `src/app/`, `src/screens/`, `src/components/`, `src/styles/`, `src/game/engine/`
-  (2D map viewport, ASCII compositor), `public/assets/` (with licenses recorded), and the old
-  `src/render/` until it is retired.
+- Owns: `src/App.jsx`, `src/ui/`, `src/styles.css`, `src/theme.js`, `src/render/` (map and surface
+  view, ASCII and dot passes), `public/assets/` (with licenses recorded).
 - Does: game shell and screens, planner and schedule UI, mission HUD, pause, debrief,
   settings, 2D map and ASCII compositor (quality presets + Off), accessibility, reduced motion.
   Playback dispatches one-hour sim steps only, never skipping hours.
@@ -37,9 +36,8 @@ Suggest `/start` at the beginning of work and `/finish` at the end.
 - Judging focus: Impact, Creativity, UX.
 
 ### dev3 – Data + Simulation (Anas)
-- Owns: `pipeline/`, `src/sim/` (except where shared below), `src/data/validateSite.js`,
-  `src/game/state/`, `src/game/config/operations.js`, `src/game/config/balance.js`,
-  `public/sites/`, `tests/sim/`, `tests/data/`.
+- Owns: `pipeline/` (SPICE pipeline), `src/sim/` (except where shared below), `src/game/`
+  (missions, schedule, progress, settings), `public/sites/` (except `connecting-ridge.json`), `tests/sim/`, `tests/ui/`.
 - Does: LOLA DEM → local east/north frame → horizon mask (+ DEM shadow method or labelled schematic);
   SPICE ephemeris; Horizons validation; site JSON with provenance; deterministic `stepMission`,
   power, battery, operations, communications, scoring.
@@ -54,10 +52,10 @@ Suggest `/start` at the beginning of work and `/finish` at the end.
   checks, accessibility passes, Horizons spot checks, docs and screenshots, profiling on the slowest laptop.
 - Skills: `qa-playtest`, `asset-license-audit`, plus the supported role's skills.
 - Branches: `<type>/dev4-as-devN-<short-name>`. PR review by that role's owner **and** dev1.
+- Can merge to `main` (agreed 2026-11-13), after tests, build and a browser check pass.
 
 ## Shared files (change only when the owner + dev1 agree)
-`CLAUDE.md`, `docs/GAME_SPEC.md`, `docs/TECHNICAL_PLAN.md`, `src/data/loadSite.js`,
-`src/app/App.jsx` (or `src/App.jsx` until moved), `src/game/state/gameReducer.js`,
+`CLAUDE.md`, `docs/GAME_SPEC.md`, `docs/TECHNICAL_PLAN.md`, `src/data/loadSite.js`, `src/App.jsx`,
 `src/sim/horizon.js`, `src/sim/visibility.js`, `tests/visibility.test.js`,
 `package.json`, `package-lock.json`.
 Dev 3 records open data/schema questions in `pipeline/NOTES_FOR_TEAM.md`.
@@ -99,7 +97,7 @@ Working protocol, milestones (M0–M5) and current status: `docs/TECHNICAL_PLAN.
 ## Git rules for Claude
 - Never edit outside the current role's area without warning and naming the owner.
 - Never commit kernels (`*.bsp`, `*.tpc`, `*.tls`, `*.bpc`, `*.tf`), DEMs, `data/raw/`, `.venv/`.
-- Never commit, push or merge without the user's OK. Only dev1 merges.
+- Never commit, push or merge without the user's OK. Only dev1 and dev4 merge to `main`.
 - Branches: `<type>/devN-<short-name>`. Commits: conventional (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
 - Commits use the developer's own git identity, with no AI co-author lines.
 - Log AI use: `pipeline/AI_USE_LOG.md` (dev3) or `AI_USE_LOG.md` (everyone else). This is
