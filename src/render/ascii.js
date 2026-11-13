@@ -1,9 +1,10 @@
-// Coloured ASCII pass: a full-screen ShaderPass that turns the rendered scene
-// into a grid of tinted glyphs. Runs in linear space between RenderPass and
-// OutputPass. The HUD is DOM and never goes through it.
+// Coloured ASCII renderer. The terrain is drawn into a small, cell-aligned
+// target (2 x 2 texels per glyph cell, see cellGrid.js), then one full-screen
+// pass turns each cell into a tinted glyph straight on the canvas, converting
+// to the output colour space itself. The HUD is DOM and never goes through it.
 import * as THREE from 'three';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { PALETTE } from '../theme.js';
+import { cellTargetLayout, cellTargetFrustum, TEXELS_PER_CELL } from './cellGrid.js';
 
 const CANDIDATES =
   " .`'^,:;\"-~_=+<>i!lI|/\\()1{}[]?rctvxzjfnuoasykehbdpqwmZXYUOLCJQ0#%&8WMB@$";
@@ -61,61 +62,46 @@ export function buildGlyphAtlas({ count = 32, cellPx = 8, font = FONT_STACK } = 
   return { texture, ramp: ramp.map((g) => g.ch).join(''), count };
 }
 
-const AsciiShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    tGlyph: { value: null },
-    glyphCount: { value: 32 },
-    resolution: { value: new THREE.Vector2(1, 1) }, // drawing-buffer pixels
-    cell: { value: 8 }, // cell size in drawing-buffer pixels
-    gridOffset: { value: new THREE.Vector2(0, 0) }, // keeps the grid on the ground while panning
-    fill: { value: 0.45 }, // scene colour showing behind the glyph
-    saturation: { value: 1.4 },
-    gain: { value: 1.6 }, // glyph tint brightness
-    duotone: { value: 0.5 }, // 0 = scene colours only, 1 = pure navy-to-amber grade
-    contrastLo: { value: 0.04 },
-    contrastHi: { value: 0.8 },
-    shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
-    emptyColor: { value: new THREE.Color(PALETTE.navy) }, // where no terrain was drawn
-    sunColor: { value: new THREE.Color(PALETTE.amber) },
-  },
-  vertexShader: /* glsl */ `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse;
-    uniform sampler2D tGlyph;
-    uniform float glyphCount;
-    uniform vec2 resolution;
-    uniform float cell;
-    uniform vec2 gridOffset;
-    uniform float fill;
-    uniform float saturation;
-    uniform float gain;
-    uniform float duotone;
-    uniform float contrastLo;
-    uniform float contrastHi;
-    uniform vec3 shadowColor;
-    uniform vec3 sunColor;
-    uniform vec3 emptyColor;
-    varying vec2 vUv;
+const glyphVertex = /* glsl */ `
+  void main() {
+    gl_Position = vec4(position.xy, 0.0, 1.0); // full-screen quad, no camera
+  }
+`;
 
-    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const glyphFragment = /* glsl */ `
+  uniform sampler2D tScene;   // cell-aligned terrain, alpha 0 = nothing drawn
+  uniform sampler2D tGlyph;
+  uniform float glyphCount;
+  uniform float cell;         // cell size in drawing-buffer pixels
+  uniform vec2 gridOffset;    // keeps the grid on the ground while panning
+  uniform float fill;
+  uniform float saturation;
+  uniform float gain;
+  uniform float duotone;
+  uniform float contrastLo;
+  uniform float contrastHi;
+  uniform vec3 shadowColor;
+  uniform vec3 sunColor;
+  uniform vec3 emptyColor;
 
-    void main() {
-      // Grid anchored to the terrain, not the screen: no glyph crawl when panning.
-      vec2 p = gl_FragCoord.xy + gridOffset;
-      vec2 cellIndex = floor(p / cell);
-      vec2 cellUv = ((cellIndex + 0.5) * cell - gridOffset) / resolution;
-      vec4 texel = texture(tDiffuse, cellUv);
-      // Empty space (alpha 0: nothing drawn, beyond the terrain edge) stays plain
-      // navy instead of turning into a field of faint glyphs.
-      if (texel.a < 0.5) { gl_FragColor = vec4(emptyColor, 1.0); return; }
-      vec3 scene = texel.rgb;
+  const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+  void main() {
+    vec2 p = gl_FragCoord.xy + gridOffset;
+    vec2 cellIndex = floor(p / cell);
+    ivec2 t0 = ivec2(cellIndex) * ${TEXELS_PER_CELL};
+
+    // The cell's 2 x 2 texels; average only the ones that hit terrain.
+    vec4 ta = texelFetch(tScene, t0, 0);
+    vec4 tb = texelFetch(tScene, t0 + ivec2(1, 0), 0);
+    vec4 tc = texelFetch(tScene, t0 + ivec2(0, 1), 0);
+    vec4 td = texelFetch(tScene, t0 + ivec2(1, 1), 0);
+    vec4 hit = step(vec4(0.5), vec4(ta.a, tb.a, tc.a, td.a));
+    float hits = dot(hit, vec4(1.0));
+
+    vec3 color = emptyColor; // beyond the terrain edge: plain navy, no glyph speckle
+    if (hits > 0.5) {
+      vec3 scene = (ta.rgb * hit.x + tb.rgb * hit.y + tc.rgb * hit.z + td.rgb * hit.w) / hits;
 
       // Linear -> perceptual, then a contrast curve so lit ground is dense and
       // shadow still shows sparse glyphs.
@@ -134,45 +120,120 @@ const AsciiShader = {
       vec3 tint = mix(vivid, grade * max(lum, 0.15), duotone);
 
       vec3 background = mix(scene, shadowColor * 0.6, duotone * 0.5) * fill;
-      gl_FragColor = vec4(mix(background, tint, ink), 1.0);
+      color = mix(background, tint, ink);
     }
-  `,
-};
+    gl_FragColor = vec4(color, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
 
 /**
- * Create the pass. Call `setSize(widthPx, heightPx)` with drawing-buffer pixels
- * whenever the renderer resizes, and `setCell(cssPx, pixelRatio, glyphs?)` to change
- * density or ramp length (rebuilds the atlas so glyphs stay crisp).
+ * Create the ASCII renderer for `renderer`. Per frame call
+ * `render(scene, camera, bufW, bufH, gridOffset, layer)`: it draws `layer` of the
+ * scene into the cell-aligned target and the glyphs onto the canvas (clearing it).
+ * `setCell(cssPx, pixelRatio, glyphs?)` changes density or ramp length (rebuilds
+ * the atlas so glyphs stay crisp).
  */
-export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {}) {
-  const pass = new ShaderPass(AsciiShader);
+export function createAsciiRenderer(renderer, { cellCss = 8, pixelRatio = 1, glyphs = 32 } = {}) {
+  const halfFloatOk =
+    renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float');
+  const target = new THREE.WebGLRenderTarget(1, 1, {
+    type: halfFloatOk ? THREE.HalfFloatType : THREE.UnsignedByteType, // linear colour needs > 8 bits in shadow
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    generateMipmaps: false,
+    depthBuffer: true,
+  });
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      tScene: { value: target.texture },
+      tGlyph: { value: null },
+      glyphCount: { value: 32 },
+      cell: { value: 8 },
+      gridOffset: { value: new THREE.Vector2(0, 0) },
+      fill: { value: 0.45 }, // scene colour showing behind the glyph
+      saturation: { value: 1.4 },
+      gain: { value: 1.6 }, // glyph tint brightness
+      duotone: { value: 0.5 }, // 0 = scene colours only, 1 = pure navy-to-amber grade
+      contrastLo: { value: 0.04 },
+      contrastHi: { value: 0.8 },
+      shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
+      sunColor: { value: new THREE.Color(PALETTE.amber) },
+      emptyColor: { value: new THREE.Color(PALETTE.navy) },
+    },
+    vertexShader: glyphVertex,
+    fragmentShader: glyphFragment,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  quad.frustumCulled = false;
+  const quadScene = new THREE.Scene();
+  quadScene.add(quad);
+  const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  const terrainCamera = new THREE.OrthographicCamera();
+  const clearColor = new THREE.Color();
+  const navy = new THREE.Color(PALETTE.navy);
   let atlas = null;
+
   const api = {
-    pass,
     ramp: '',
-    setSize(w, h) {
-      pass.uniforms.resolution.value.set(w, h);
-    },
-    /** [x, y] sub-cell shift in drawing-buffer pixels (see camera.gridOffsetPx). */
-    setGridOffset(x, y) {
-      pass.uniforms.gridOffset.value.set(x, y);
-    },
+    halfFloat: halfFloatOk,
     get cellPx() {
-      return pass.uniforms.cell.value;
+      return material.uniforms.cell.value;
+    },
+    get target() {
+      return target;
     },
     setCell(css, dpr, count = glyphs) {
       glyphs = count;
       const cellPx = Math.max(4, Math.round(css * dpr));
       atlas?.texture.dispose();
       atlas = buildGlyphAtlas({ count: glyphs, cellPx });
-      pass.uniforms.tGlyph.value = atlas.texture;
-      pass.uniforms.glyphCount.value = atlas.count;
-      pass.uniforms.cell.value = cellPx;
+      material.uniforms.tGlyph.value = atlas.texture;
+      material.uniforms.glyphCount.value = atlas.count;
+      material.uniforms.cell.value = cellPx;
       api.ramp = atlas.ramp;
+    },
+    render(scene, camera, bufW, bufH, gridOffset, layer = 0) {
+      const cellPx = material.uniforms.cell.value;
+      const layout = cellTargetLayout(bufW, bufH, cellPx);
+      if (target.width !== layout.width || target.height !== layout.height) {
+        target.setSize(layout.width, layout.height); // only on resize / cell change
+      }
+      const f = cellTargetFrustum(camera, bufH, cellPx, gridOffset, layout);
+      terrainCamera.left = f.left;
+      terrainCamera.right = f.right;
+      terrainCamera.top = f.top;
+      terrainCamera.bottom = f.bottom;
+      terrainCamera.near = camera.near;
+      terrainCamera.far = camera.far;
+      terrainCamera.zoom = 1;
+      terrainCamera.position.copy(camera.position);
+      terrainCamera.quaternion.copy(camera.quaternion);
+      terrainCamera.layers.set(layer);
+      terrainCamera.updateProjectionMatrix();
+      terrainCamera.updateMatrixWorld();
+
+      // Terrain into the target, cleared to transparent so empty space is known.
+      renderer.getClearColor(clearColor);
+      const clearAlpha = renderer.getClearAlpha();
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(navy, 0);
+      renderer.render(scene, terrainCamera);
+      renderer.setRenderTarget(null);
+      renderer.setClearColor(clearColor, clearAlpha);
+
+      material.uniforms.gridOffset.value.set(gridOffset[0], gridOffset[1]);
+      renderer.render(quadScene, quadCamera); // glyphs onto the canvas
     },
     dispose() {
       atlas?.texture.dispose();
-      pass.dispose?.();
+      target.dispose();
+      quad.geometry.dispose();
+      material.dispose();
     },
   };
   api.setCell(cellCss, pixelRatio);

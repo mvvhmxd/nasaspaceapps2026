@@ -3,13 +3,10 @@
 // from quality.js; `A` toggles Off and back; at low fps it steps down to Performance at most.
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTerrain, landerEye, blockedToward } from './terrain.js';
 import { directionFromAzEl } from './sun.js';
 import { createTopDownCamera, fitTopDown, gridOffsetPx } from './camera.js';
-import { createAsciiPass } from './ascii.js';
+import { createAsciiRenderer } from './ascii.js';
 import { createSkyMarkers } from './markers.js';
 import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
 import { createFpsGovernor } from './fpsGovernor.js';
@@ -37,6 +34,11 @@ export function createSurfaceScene(
   renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap; // three.js removed PCFSoftShadowMap and fell back to this anyway
+  // The terrain is static, so the shadow map only changes when the Sun moves or
+  // its size changes: redraw it then (see requestShadowUpdate), not every frame.
+  renderer.shadowMap.autoUpdate = false;
+  const requestShadowUpdate = () => { renderer.shadowMap.needsUpdate = true; };
+  requestShadowUpdate();
   renderer.setClearColor(PALETTE.navy);
 
   const scene = new THREE.Scene();
@@ -88,16 +90,10 @@ export function createSurfaceScene(
   controls.minZoom = 0.7;
   controls.maxZoom = 12;
 
-  // ASCII chain: scene -> glyph pass -> output (tone mapping + sRGB once).
-  const composer = new EffectComposer(renderer);
-  const scenePass = new RenderPass(scene, camera);
-  // Clear to transparent so the glyph pass can tell empty space from dark terrain.
-  scenePass.clearColor = new THREE.Color(PALETTE.navy);
-  scenePass.clearAlpha = 0;
-  composer.addPass(scenePass);
-  const ascii = createAsciiPass({ cellCss: cellCss || preset().cellCss, pixelRatio, glyphs: preset().glyphs });
-  composer.addPass(ascii.pass);
-  composer.addPass(new OutputPass());
+  // ASCII: terrain -> small cell-aligned target -> one glyph pass on the canvas.
+  const ascii = createAsciiRenderer(renderer, {
+    cellCss: cellCss || preset().cellCss, pixelRatio, glyphs: preset().glyphs,
+  });
 
   let lastAsciiQuality = preset().ascii ? quality : DEFAULT_QUALITY; // where `A` returns to
   let lastReason = 'user';
@@ -109,6 +105,7 @@ export function createSurfaceScene(
     sun.shadow.mapSize.setScalar(size);
     sun.shadow.map?.dispose(); // three.js rebuilds it at the new size next frame
     sun.shadow.map = null;
+    requestShadowUpdate();
   }
 
   function setQuality(name, reason = 'user') {
@@ -143,6 +140,7 @@ export function createSurfaceScene(
     directionFromAzEl(az, el, sunDir);
     sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
     sun.target.position.set(0, 0, 0);
+    requestShadowUpdate();
     return { renderBlocked: blockedToward(terrain, eye, sunDir) };
   }
 
@@ -164,10 +162,10 @@ export function createSurfaceScene(
     const h = canvas.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
-    composer.setSize(w, h);
     renderer.getDrawingBufferSize(buffer);
-    ascii.setSize(buffer.x, buffer.y);
-    fitTopDown(camera, w / h);
+    // Aspect of the real buffer, so one metre is the same number of pixels on
+    // both axes (the grid anchoring and the terrain target assume it).
+    fitTopDown(camera, buffer.x / buffer.y);
   }
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
@@ -176,10 +174,8 @@ export function createSurfaceScene(
   function draw() {
     lander.scale.setScalar(1 / camera.zoom); // constant screen size
     if (preset().ascii) {
-      const [ox, oy] = gridOffsetPx(camera, buffer.y, ascii.cellPx);
-      ascii.setGridOffset(ox, oy);
-      camera.layers.set(0); // terrain only through the glyph pass
-      composer.render();
+      const offset = gridOffsetPx(camera, buffer.y, ascii.cellPx);
+      ascii.render(scene, camera, buffer.x, buffer.y, offset, 0); // terrain layer as glyphs
       camera.layers.set(SHARP_LAYER); // lander drawn crisp on top
       renderer.autoClear = false;
       renderer.clearDepth();
@@ -220,6 +216,8 @@ export function createSurfaceScene(
     get asciiOn() { return preset().ascii; },
     get autoOff() { return quality === 'off' && lastReason === 'auto'; },
     get ramp() { return ascii.ramp; },
+    /** three.js render stats (draw calls, live textures / geometries) for profiling. */
+    get renderInfo() { return renderer.info; },
     dispose() {
       renderer.setAnimationLoop(null);
       window.removeEventListener('keydown', onKey);
@@ -227,7 +225,6 @@ export function createSurfaceScene(
       controls.dispose();
       ascii.dispose();
       skyMarkers.dispose();
-      composer.dispose?.();
       terrain.traverse((o) => o.geometry?.dispose());
       renderer.dispose();
     },
