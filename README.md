@@ -43,13 +43,16 @@ Useful URL options: `?replan=5` (short replan countdown for demos), `?ascii=forc
 ## Data and how it is checked
 | What | Source | Used for |
 |---|---|---|
-| Terrain | NASA LOLA gridded elevation, PDS data set LRO-L-LOLA-4-GDR-V1.0 (product V2.0): `LDEM_85S_40M` and `LDEM_80S_80M` | The map, and the horizon in every direction out to 250 km |
-| Sun and Earth positions | NASA NAIF SPICE with DE440 (`de440s.bsp`, `moon_pa_de440_200625.bpc`, `moon_de440_250416.tf`, `pck00011.tpc`, `naif0012.tls`) | Hourly azimuth and elevation at each site |
-| Independent check | JPL Horizons API | Verifies the SPICE results; never supplies game numbers |
+| Terrain | NASA LOLA: the 5 m site DEM (NASA GSFC PGDA, Barker et al. 2021) for Connecting Ridge; the gridded polar DEMs (PDS data set LRO-L-LOLA-4-GDR-V1.0: `LDEM_85S_40M`, `LDEM_80S_80M`, and the 240 m product) for the rest and for far horizons | The map, and the horizon in every direction (to 450 km or 250 km) |
+| Sun and Earth positions | JPL Horizons (Connecting Ridge); NASA NAIF SPICE with DE440 (`de440s.bsp`, `moon_pa_de440_200625.bpc`, `moon_de440_250416.tf`, `pck00011.tpc`, `naif0012.tls`) for the other sites | Hourly azimuth and elevation at each site |
+| Independent check | JPL Horizons API | Verifies the SPICE results for the other sites |
 
-Rule: **SPICE computes, Horizons verifies.**
+Two pipelines produce the site files:
+- **Connecting Ridge** comes from the team lead's `scripts/pipeline/make_site.py`: the 5 m LOLA site DEM (NASA GSFC PGDA, Barker et al. 2021) for the terrain, the 240 m polar DEM for the far horizon out to 450 km, and the Sun and Earth series straight from JPL Horizons. See [`docs/features/data-pipeline/`](docs/features/data-pipeline/design.md).
+- **Polar spur, Massif shoulder and Low rise** come from [`pipeline/`](pipeline/README.md): the 40 m polar LOLA DEM out to 250 km, and the Sun and Earth computed with SPICE, then checked against Horizons. For these: **SPICE computes, Horizons verifies.**
 
-- **Sun and Earth vs Horizons:** the largest difference is 0.00007° at every site, over 1,440 hours each. Reports are in `pipeline/validation/`.
+- **Sun and Earth vs Horizons (SPICE sites):** the largest difference is 0.00007° at every site, over 1,440 hours each. Reports are in `pipeline/validation/`.
+- **Horizon vs the drawn terrain:** `tests/visibility.test.js` checks every site's stored horizon against the one computed from the drawn mesh, and that the 3D view's shadows agree with the sim.
 - **Terrain reading:** known deep craters appear at the expected depth, and the two LOLA products agree to within a metre at the same points.
 - **Horizon geometry:** unit tests check that a smooth sphere gives the textbook dip angle and that a wall is seen only in its own direction.
 - **Game logic:** `npm test` (32 tests) covers visibility, the survival sim, the planner, the schedule forecast and saved progress. The forecast is tested to equal the hour-by-hour playback.
@@ -64,8 +67,8 @@ The offline pipeline that produces `public/sites/<id>.json` is in [`pipeline/`](
 - **The Sun is a point.** It counts as up when its centre clears the horizon; the real disc is about 0.5° wide, so real sunrise is gradual.
 - **Terrain grid is 40 m** and the lander's eye is 2 m above it. Boulders and small bumps are not modelled.
 - **On-map shadows are a visual aid.** They use only the 10 km around the site. The SUNLIT / IN SHADOW status is the calculated truth and uses the 250 km horizon.
-- **The four sites are the team's own picks** from a search of the LOLA terrain for high points near the pole (`pipeline/scripts/candidates.py`). They are not official or proposed landing sites.
-- **The window is 60 days from 2026-12-01.**
+- **Sites:** Connecting Ridge was chosen by the team lead. The other three are the team's own picks from a search of the LOLA terrain for points that stay lit in this window (`pipeline/scripts/candidates.py`). None are official or proposed landing sites.
+- **The window is 60 days from 2027-03-01** for every site. It is the dark season at the south pole (Connecting Ridge is sunlit 28% of it), which is what makes the missions hard.
 
 ## How it is built
 Static site: Vite + React for the screens, three.js for the top-down map with a coloured ASCII shader. No backend, no AI in the product.

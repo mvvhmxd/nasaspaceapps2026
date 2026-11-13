@@ -122,7 +122,9 @@ export default function App() {
 
   useEffect(() => {
     if (!sky || !sceneRef.current) return;
-    const { renderBlocked: rb } = sceneRef.current.setSun(sky.sunAz, sky.sunEl);
+    const { renderBlocked: rb } = sceneRef.current.setSun(sky.sunAz, sky.sunEl, {
+      farBlocked: sky.sunBehindFarTerrain,
+    });
     setRenderBlocked(rb);
     sceneRef.current.setLanderInShadow(!sky.sunlit); // the sim decides
     sceneRef.current.setEarth(sky.earthAz, sky.earthEl);
@@ -315,7 +317,9 @@ export default function App() {
     );
   }
 
-  const agree = sky && renderBlocked !== null ? renderBlocked === !sky.sunlit : null;
+  // The crop can only cast shadows from terrain inside it, so the render is
+  // checked against the near horizon; far-terrain shadows are labelled instead.
+  const agree = sky && renderBlocked !== null ? renderBlocked === sky.sunEl <= sky.sunNearMask : null;
   const next = nextMissionId(mission.id);
   const samePin = (a, b) => a.siteId === b.siteId && a.day === b.day;
 
@@ -331,8 +335,8 @@ export default function App() {
                 <div className="title">{site.name}</div>
                 <SkyBadge site={site} />
                 <div>{utcLabel(site, sky.hour)}</div>
-                <div>Sun az {sky.sunAz.toFixed(1)}&deg; el {sky.sunEl.toFixed(2)}&deg; &middot; ridge {sky.sunMask.toFixed(2)}&deg;</div>
-                <div className={sky.sunlit ? 'lit' : 'dark'}>{sky.sunlit ? '☀ SUNLIT' : '● IN SHADOW'}</div>
+                <div>Sun az {sky.sunAz.toFixed(1)}&deg; el {sky.sunEl.toFixed(2)}&deg; &middot; horizon {sky.sunMask.toFixed(2)}&deg;</div>
+                <div className={sky.sunlit ? 'lit' : 'dark'}>{sky.sunlit ? '☀ SUNLIT' : sky.sunBehindFarTerrain ? '● IN SHADOW (far terrain)' : '● IN SHADOW'}</div>
                 <div className={sky.earthVisible ? 'comms' : 'dark'}>
                   {sky.earthVisible ? '◆ EARTH IN VIEW' : '◇ NO EARTH CONTACT'} (el {sky.earthEl.toFixed(1)}&deg;)
                 </div>

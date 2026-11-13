@@ -1,6 +1,6 @@
 # Crater Expectations — Game Design Document
 
-**Version:** 0.4 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log) · [Architecture](ARCHITECTURE.md)
+**Version:** 0.5 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log) · [Architecture](ARCHITECTURE.md)
 
 ## Summary
 You are the mission planner for a small lander going to the Moon's south pole. You choose where and when to land, plan the work around when the Sun and Earth are up, then watch the mission play out on real terrain while the battery drains in every shadow. A launch delay can change the sky and force you to replan. A mission ends when you survive the full window (stars for science collected compared with the best possible plan) or when the battery hits zero.
@@ -37,10 +37,10 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 |---|---|---|---|---|
 | Site planner | built | MVP | Pick site + landing date; preview sun hours, Earth hours, longest dark; compare 3 side by side | [design](features/site-planner/design.md) |
 | Survival sim | built | MVP | Hour-by-hour battery and comms from the real sun/Earth series; win by surviving, score by science | [design](features/survival-sim/design.md) |
-| Surface view | built (top-down only) | MVP | Three.js LOLA terrain, Sun as shadow-casting light, ASCII shader, Sun/Earth compass; no hero camera | [design](features/surface-view/design.md) |
+| Surface view | built | MVP | Three.js LOLA terrain, Sun as shadow-casting light (off when far terrain hides it), ASCII shader, Sun/Earth compass; second view (V) behind the rover with halftone dots | [design](features/surface-view/design.md) |
 | Launch slip | built (mission 3: 5 days) | MVP | A delay of 3 to 12 days moves the landing date; 60 s to re-pick site or date | — |
 | Debrief | built | MVP | Survived or not, stars, your plan vs the best automatic plan; "How it works" and "Data and credits" with the Horizons check | — |
-| Data pipeline | built | MVP | Offline Python: LOLA crop → wide-DEM horizon mask → SPICE Sun/Earth series → Horizons check → site JSON | [pipeline](../pipeline/README.md) |
+| Data pipeline | built (two pipelines) | MVP | Dev 1's `scripts/pipeline/` (5 m LOLA, sky from Horizons) builds Connecting Ridge; `pipeline/` (40 m polar LOLA, SPICE sky checked against Horizons) builds spur, massif and hollow | [design](features/data-pipeline/design.md), [pipeline](../pipeline/README.md) |
 | Missions | built | MVP | M1 First Light (1 site, 7 days), M2 Call Home (2 sites, +schedule), M3 The Long Shadow (3 sites, +launch slip); unlocks and saved stars | — |
 | Task schedule | built | should | Timeline of 6-hour blocks; paint Drill, Transmit, Sleep, Stay awake; live battery forecast | — |
 | Solver | partly built | should | Searches all sites × landing days for the best automatic plan; gives stars and the debrief comparison. Does not search schedules | — |
@@ -49,7 +49,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 | Planner mode | idea | stretch | No game wrapper: enter constraints and get the best site and date from the solver | — |
 
 ## Milestones
-1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge. *Built on the illustrative demo site 2026-11-13; the real-data half waits for the pipeline.*
+1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge. *Done 2026-11-13 on Connecting Ridge (real LOLA + Horizons): at hour 59 Horizons puts the Sun at −0.08°, behind a ridge at 0.23°, and the lander is red.*
 1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps. *Done 2026-11-13: 144 fps with ASCII on, on the lead's laptop.*
 2. **M2, the loop in grey:** site planner + survival sim + launch slip + debrief, 1 mission, 3 sites · done when: a teammate plays start to restart without help.
 3. **M3, identity:** ASCII shader, colours, both cameras, missions 1 and 2 · done when: the M2 run looks like the target style at 60 fps on a team laptop.
@@ -71,22 +71,25 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 | D-002 | 2026-11-13 | Surface view is 3D three.js with detailed coloured ASCII; must ship | 2D sky strip only | Team wants it; it is the project's visual identity | Surface view |
 | D-003 | 2026-11-13 | Two cameras: top-down default, hero on `V` | Top-down only; hero only | Top-down reads shadows and routes; hero shows Sun and Earth against the horizon | Surface view |
 | D-004 | 2026-11-13 | ASCII pass moves from M3 to right after M1 (M1b) | Keep it in M3 after the grey loop | The team wants the ASCII look as the game's identity from the start; it is also the biggest frame-rate risk, so find out early | Milestones, surface view |
-| D-005 | 2026-11-13 | SPICE (DE440) computes the Sun and Earth series; JPL Horizons only verifies them | Download the series from Horizons | One reproducible source for shipped numbers plus an independent check (0.00007° at every site) | Data pipeline, credits |
-| D-006 | 2026-11-13 | The horizon mask comes from a wide LOLA DEM (to 250 km), the mesh from a 10 km crop | Mask from the mesh crop | At these sites the horizon is set by terrain up to 190 km away | Data pipeline, surface view |
-| D-007 | 2026-11-13 | Proposed, needs the lead: sites are four high points found by searching LOLA (`ridge`, `spur`, `knoll`, `hollow`), window 60 days from 2026-12-01 | Cited candidate regions from the literature | Lets the game run on real data now; clearly labelled as the team's own picks | Missions, planner |
-| D-008 | 2026-11-13 | Proposed, needs the lead: top-down view only; the hero camera (D-003) is dropped | Keep two cameras | The newer game spec asks for a strict top-down strategy map; a compass now shows Sun and Earth directions | Surface view |
+| D-005 | 2026-11-13 | Inside the crop the horizon comes from the 40 m terrain the game draws; beyond it from the 5 m and 240 m LOLA DEMs | Full 5 m horizon everywhere | Sub-40 m bumps within 100 m of the lander set over half the 5 m horizon, below the DEM's accuracy, and the 3D view could never show them; one surface keeps the render and the sim in step | Data pipeline, surface view |
+| D-006 | 2026-11-13 | Proposed: for `pipeline/` sites, SPICE (DE440) computes the Sun and Earth series and JPL Horizons verifies them. Dev 1's site takes the series from Horizons directly; the lead decides which approach the team keeps | Download the series from Horizons | One reproducible source for shipped numbers plus an independent check (0.00007° at every site) | Data pipeline, credits |
+| D-007 | 2026-11-13 | `pipeline/` sites: horizon mask from the 40 m polar LOLA DEM to 250 km, mesh from a 10 km crop (compare D-005) | Mask from the mesh crop | At these sites the horizon is set by terrain up to 190 km away | Data pipeline, surface view |
+| D-008 | 2026-11-13 | Proposed, needs the lead: Connecting Ridge (Dev 1) plus three high points found by searching LOLA (`spur`, `massif`, `hollow`), all on Dev 1's window, 60 days from 2027-03-01 | Cited candidate regions from the literature | Lets the game run on real data now; clearly labelled as the team's own picks | Missions, planner |
+| D-009 | 2026-11-13 | Proposed, needs the lead: the map stays top-down; the second camera (D-003) returns as the rover's surface view (V) | Keep two cameras | The newer game spec asks for a strict top-down strategy map; a compass now shows Sun and Earth directions | Surface view |
 
 ## Open questions
 - **Assumptions to confirm:** desktop only; all `[ASSUMPTION]` values in the feature notes; the sites and window in D-007; dropping the hero camera in D-008.
 - **Known gaps:** no human playtest yet; no public deployment; no music; the Sun is a point (no partial disc); stars are measured against the automatic plan only.
 - **Risks:**
   - *Tech:* ASCII shader + shadows at 60 fps: 144 fps on the lead's laptop (M1b); confirm on the slowest team laptop at M3.
-  - *Data:* the Horizons series for a surface site, and the LOLA horizon, must match (the M1 done-when test).
+  - *Data:* the LOLA horizon and the Horizons series now agree with the render (M1 done); still to cross-check illumination against published PGDA maps.
+  - *Design:* the season swings the sunlit share from 16% to 82% at the same site; the planner must make the landing date as visible a choice as the site.
   - *Design:* is watching the survival phase fun, or dead time? (playtest at M2; fallback: faster time, more events).
   - *Scope:* local event end time not known yet; see `JAM.md`.
 
 ## Change log
 **0.1 (2026-11-13):** first draft from the planning chat; site planner, survival sim and surface view designed; D-001 to D-003 logged.
 **0.2 (2026-11-13):** M1 scene proof built ([surface view](features/surface-view/implementation.md)); [Architecture](ARCHITECTURE.md) added with the site data format; M1b added and D-004 logged.
-**0.4 (2026-11-13):** the loop is playable end to end on real data: planner, schedule, survival, launch slip, debrief, three missions, settings and sound; data pipeline built (LOLA terrain, SPICE sky, Horizons check); D-005 to D-008 logged. Not yet merged to `main`.
+**0.5 (2026-11-13):** the loop is playable end to end on real data: planner, schedule, survival, launch slip, debrief, three missions, settings and sound; data pipeline built (LOLA terrain, SPICE sky, Horizons check); D-006 to D-009 logged; merged with Dev 1's 0.4 (Connecting Ridge now used in all three missions). Not yet merged to `main`.
+**0.4 (2026-11-13):** [data pipeline](features/data-pipeline/design.md) built for Connecting Ridge; M1 done on real data; D-005 logged.
 **0.3 (2026-11-13):** M1b ASCII pass built ([surface view](features/surface-view/design.md), ramp and cell size changed); 144 fps measured in a real browser, M1b done.

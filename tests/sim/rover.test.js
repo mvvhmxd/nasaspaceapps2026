@@ -5,7 +5,7 @@ import { stateAt } from '../../src/sim/visibility.js';
 import { ROVER, groundY, localBlocked, sunlitAt, findIceTargets, initialRover, stepRover, iceScore } from '../../src/sim/rover.js';
 
 const load = (id) => decodeSite(JSON.parse(readFileSync(`public/sites/${id}.json`, 'utf8')));
-const site = load('ridge');
+const site = load('connecting-ridge');
 const targets = findIceTargets(site);
 const SUN = { sunAz: 0, sunEl: 80, sunlit: true }; // high Sun: nothing blocks it
 const DARK = { sunAz: 0, sunEl: -5, sunlit: false };
@@ -21,7 +21,7 @@ const drive = (s, rover, input, hours, sky, tg = []) => {
 
 describe('rover', () => {
   it('finds separated ice prospects below the lander, inside the map, on every mission site', () => {
-    for (const id of ['ridge', 'spur', 'knoll', 'hollow']) {
+    for (const id of ['connecting-ridge', 'spur', 'massif', 'hollow']) {
       const s = load(id), t = findIceTargets(s);
       expect(t.length).toBeGreaterThanOrEqual(2);
       const edge = ((s.heightmap.size - 1) / 2) * s.heightmap.spacingM;
@@ -99,7 +99,7 @@ describe('rover', () => {
     expect(localBlocked(wall, 0, 0, 0, 60)).toBe(false);
   });
 
-  it('on the real ridge site, the deepest prospect is darker than the lander over the window', () => {
+  it('on the real Connecting Ridge site, the deepest prospect is darker than the lander over the window', () => {
     const deep = targets[0];
     let lander = 0, pit = 0;
     for (let h = 0; h < site.hours; h += 6) {

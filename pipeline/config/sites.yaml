@@ -3,25 +3,21 @@
 # (scripts/candidates.py). They are NOT official, selected or proposed landing sites.
 # Dev 1: replace with the final 3 sites and a citation for each.
 window:
-  start_utc: "2026-12-01T00:00:00Z"
+  start_utc: "2027-03-01T00:00:00Z"  # same window as Dev 1's connecting-ridge site
   hours: 1440
   step_hours: 1
+# Connecting Ridge is built by Dev 1's scripts/pipeline/make_site.py (5 m DEM), not here.
 sites:
-  - id: ridge
-    name: "Connecting ridge"
-    blurb: "The highest point within 2 degrees of the pole, about 1.95 km above the reference sphere. Wide open horizon."
-    lat_deg: -89.449
-    lon_deg: 222.38
   - id: spur
     name: "Polar spur"
     blurb: "A rise 14 km from the pole, beside a crater nearly 4 km deep. Long views toward Earth."
     lat_deg: -89.548
     lon_deg: 81.35
-  - id: knoll
-    name: "Near-side knoll"
-    blurb: "A low knoll on the Earth-facing side, 41 km from the pole. Ordinary ground, not a peak."
-    lat_deg: -88.651
-    lon_deg: 19.92
+  - id: massif
+    name: "Massif shoulder"
+    blurb: "A high shoulder 1.8 km above the reference sphere, 41 km from the pole. The best-lit point we found for March and April 2027."
+    lat_deg: -88.665
+    lon_deg: 291.53
   - id: hollow
     name: "Low rise"
     blurb: "A small rise among higher terrain, 31 km from the pole. Ridges up to 5 degrees high surround it."

@@ -14,9 +14,11 @@ export function Stars({ n }) {
 export function SkyBadge({ site }) {
   return (
     <>
-      {site.terrain?.real && <div className="badge teal">Terrain: NASA LOLA</div>}
-      {site.sky?.real && <div className="badge teal">Sky: SPICE DE440 &#10003; Horizons</div>}
       {site.illustrative && <div className="badge">Illustrative</div>}
+      {!site.illustrative && <div className="badge teal" title={site.source}>Terrain: NASA LOLA</div>}
+      {!site.illustrative && (
+        <div className="badge teal" title={site.source}>{site.sky ? <>Sky: SPICE DE440 &#10003; Horizons</> : 'Sky: JPL Horizons'}</div>
+      )}
     </>
   );
 }
@@ -27,7 +29,7 @@ export function Title({ onStart, onHelp, onCredits, onSettings }) {
       <h1>CRATER EXPECTATIONS</h1>
       <p className="tag">Plan a landing at the Moon&rsquo;s south pole. Then live with it.</p>
       <div className="badge teal">Terrain and horizons: NASA LOLA</div>{' '}
-      <div className="badge teal">Sun and Earth: SPICE DE440, checked against JPL Horizons</div>
+      <div className="badge teal">Sun and Earth: JPL Horizons and SPICE DE440</div>
       <div className="row">
         <button className="primary" onClick={onStart} autoFocus>Play</button>
         <button onClick={onHelp}>How it works</button>
@@ -90,8 +92,8 @@ export function Help({ onClose }) {
     <div className="panel center help" role="dialog" aria-label="How it works">
       <h2>How it works</h2>
       <p><b>Horizon.</b> For each of 360 compass directions the game knows how high the terrain rises as seen from the lander. The Sun or Earth is visible only when its elevation is above the terrain in its direction.</p>
-      <p><b>Sky.</b> Hourly Sun and Earth directions are computed with NASA&rsquo;s SPICE toolkit and the DE440 ephemeris for each site&rsquo;s coordinates, then checked against JPL Horizons. The game never moves them for drama.</p>
-      <p><b>Terrain.</b> The map and the horizon come from NASA&rsquo;s LOLA laser-altimeter elevation model of the south pole. The horizon looks out to 250 km, because a distant ridge can hide a Sun that is only 1&deg; up.</p>
+      <p><b>Sky.</b> Hourly Sun and Earth directions come from JPL Horizons (Connecting Ridge) or are computed with NASA&rsquo;s SPICE toolkit and the DE440 ephemeris and checked against Horizons (the other sites). The game never moves them for drama.</p>
+      <p><b>Terrain.</b> The map and the horizon come from NASA&rsquo;s LOLA laser-altimeter elevation model of the south pole. The horizon looks out to 250 to 450 km, because a distant ridge can hide a Sun that is only 1&deg; up.</p>
       <p><b>Simplifications.</b> The Sun counts as up when its centre clears the horizon (the real disc is about 0.5&deg; wide, so real sunrise is gradual). The lander&rsquo;s eye is 2 m above a 40 m terrain grid, so boulders and small bumps are not modelled. The 3D shadows drawn on the map use only the 10 km around the site and are a visual aid; the SUNLIT / IN SHADOW status is the calculated truth.</p>
       <p><b>Power.</b> Battery numbers are <b>game values</b>, balanced for play, not taken from a real lander. Sunlit hours charge; every hour drains; sleeping drains least.</p>
       <p><b>Rover.</b> Drive with W A S D or the arrow keys (only at 1&times; speed). V switches between the map and the surface view; in the surface view, drag to look around and A / D turn. Ice prospects are the deepest reachable low ground in the 10 km map, chosen by rule; they are prospects, not known ice deposits. The rover&rsquo;s sunlight uses the local terrain plus the lander&rsquo;s far horizon, which is an approximation away from the lander. In the surface view the Sun and Earth are at their true positions, but drawn larger than life so they read on screen (the Sun 4&times;, the Earth 8&times;). The camera rides about 220 m above and behind the rover so the real crater relief is visible, and it is exposed like a camera. Ground colour shows game state: amber where sunlight reaches (the rover charges), blue in shadow (it drains), white under the rover&rsquo;s floodlight. H hides the panels.</p>
@@ -102,27 +104,33 @@ export function Help({ onClose }) {
 }
 
 export function Credits({ sites, onClose }) {
+  const spice = sites.filter((s) => s.sky);
+  const sky = spice[0]?.sky;
   return (
     <div className="panel center help" role="dialog" aria-label="Data and credits">
       <h2>Data and credits</h2>
-      <p><b>Sun and Earth positions (real).</b> NASA NAIF SPICE toolkit with kernels {sites[0]?.sky?.kernels?.join(', ')}. Frame {sites[0]?.sky?.frame}, apparent directions ({sites[0]?.sky?.aberration}), no atmosphere.</p>
       <table className="stats">
-        <thead><tr><th>Site</th><td>Lat, lon</td><td>Max difference vs Horizons (Sun / Earth)</td></tr></thead>
+        <thead><tr><th>Site</th><td>Lat, lon</td><td>Sun and Earth</td></tr></thead>
         <tbody>
           {sites.map((s) => (
             <tr key={s.id}>
               <th>{s.name}</th>
               <td>{s.lat}&deg;, {s.lon}&deg; E</td>
-              <td>{s.sky.validation.sunMaxSeparationDeg}&deg; / {s.sky.validation.earthMaxSeparationDeg}&deg;</td>
+              <td>{s.sky
+                ? <>SPICE; max difference vs Horizons {s.sky.validation.sunMaxSeparationDeg}&deg; / {s.sky.validation.earthMaxSeparationDeg}&deg;</>
+                : 'JPL Horizons'}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="dim small">Checked {sites[0]?.sky?.validation?.checkedUtc} against the JPL Horizons API, tolerance {sites[0]?.sky?.validation?.toleranceDeg}&deg;. The sites are high points this team found by searching the LOLA terrain. They are not official or proposed landing sites.</p>
-      <p><b>Terrain and horizons (real).</b> NASA LOLA gridded elevation, PDS data set {sites[0]?.terrain?.dataSet}, product version {sites[0]?.terrain?.productVersion}: {sites[0]?.terrain?.horizonProducts?.join(' and ')}. Frame: {sites[0]?.terrain?.frame?.toLowerCase()}. Resampled to a local east/north grid; horizon computed out to {sites[0]?.terrain?.horizonRangeKm} km for an observer {sites[0]?.terrain?.eyeHeightM} m above the surface.</p>
+      {sites.filter((s) => !s.sky).map((s) => <p key={s.id} className="small"><b>{s.name}:</b> {s.source}</p>)}
+      {sky && (
+        <p className="small"><b>Other sites:</b> terrain from NASA LOLA gridded elevation (PDS data set {spice[0].terrain?.dataSet}: {spice[0].terrain?.horizonProducts?.join(' and ')}), horizon to {spice[0].terrain?.horizonRangeKm} km. Sun and Earth computed with NASA&rsquo;s SPICE toolkit and DE440 ({sky.kernels?.join(', ')}; frame {sky.frame}, {sky.aberration}), then checked against the JPL Horizons API on {sky.validation.checkedUtc}, tolerance {sky.validation.toleranceDeg}&deg;.</p>
+      )}
+      <p className="dim small">Connecting Ridge was chosen by the team lead. The other sites are high points the team found by searching the LOLA terrain. None of them are official or proposed landing sites.</p>
       <p><b>Challenge resources.</b> JPL Horizons, LROC QuickMap, NASA Moon Trek, Canadian Space Agency Moon exploration pages.</p>
       <p><b>Sound.</b> All sounds are synthesised in the browser by this game&rsquo;s own code. No audio files or third-party assets are used.</p>
-      <p><b>Built with.</b> React, three.js, Vite, SpiceyPy. AI coding assistance was used during development; see the team&rsquo;s AI use log.</p>
+      <p><b>Built with.</b> React, three.js, Vite, SpiceyPy, NumPy, rasterio. AI coding assistance was used during development; see the team&rsquo;s AI use log.</p>
       <p className="dim small">Made for the NASA Space Apps Challenge 2026. Not affiliated with or endorsed by NASA.</p>
       <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
     </div>

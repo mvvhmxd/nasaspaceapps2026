@@ -1,8 +1,8 @@
 {
-  "id": "ridge",
-  "lat": -89.449,
-  "lon": 222.38,
-  "startUtc": "2026-12-01T00:00:00Z",
+  "id": "massif",
+  "lat": -88.665,
+  "lon": 291.53,
+  "startUtc": "2027-03-01T00:00:00Z",
   "hours": 1440,
   "toleranceDeg": 0.02,
   "spice": {
@@ -26,20 +26,20 @@
     "quantities": 4,
     "apparent": "AIRLESS"
   },
-  "checkedUtc": "2026-11-13T18:41Z",
+  "checkedUtc": "2026-11-13T20:07Z",
   "bodies": {
     "sun": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 728,
+      "worstHour": 698,
       "pass": true
     },
     "earth": {
       "maxSeparationDeg": 7e-05,
       "meanSeparationDeg": 4e-05,
       "maxElevationDiffDeg": 5e-05,
-      "worstHour": 972,
+      "worstHour": 143,
       "pass": true
     }
   },

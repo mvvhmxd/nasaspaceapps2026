@@ -25,6 +25,7 @@ export function stateAt(site, hour) {
   const earthEl = s.earthEl[h];
   const sunMask = maskAt(site.horizonMask, sunAz);
   const earthMask = maskAt(site.horizonMask, earthAz);
+  const sunNearMask = site.nearMask ? maskAt(site.nearMask, sunAz) : sunMask;
   return {
     hour: h,
     timeUtc: new Date(Date.parse(s.startUtc) + h * s.stepHours * 3600e3),
@@ -34,7 +35,10 @@ export function stateAt(site, hour) {
     earthEl,
     sunMask,
     earthMask,
+    sunNearMask,
     sunlit: sunEl > sunMask,
+    // In shadow of terrain beyond the crop: the 3D view cannot cast this shadow.
+    sunBehindFarTerrain: sunEl <= sunMask && sunEl > sunNearMask,
     earthVisible: earthEl > earthMask,
   };
 }

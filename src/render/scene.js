@@ -188,7 +188,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   let mapCellCss = cellCss;
   let yaw = 0, pitch = DEFAULT_PITCH; // degrees: where the surface camera looks
   let roverHeading = 0;
-  let sunEl = 1, siteDark = false;
+  let sunEl = 1, siteDark = false, sunFarBlocked = false;
   const camBack = new THREE.Vector3();
   const roverPos = new THREE.Vector3(0, eye.y, 0);
   const earthDir = new THREE.Vector3(0, -1, 0);
@@ -226,13 +226,18 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
 
   const sunDir = new THREE.Vector3();
 
-  /** Point the Sun for one hour; returns whether the terrain blocks it (render check). */
-  function setSun(az, el) {
+  /**
+   * Point the Sun for one hour; returns whether the terrain blocks it (render check).
+   * farBlocked: the sim says terrain beyond the crop hides the Sun. That shadow
+   * cannot be cast by the crop, so the Sun light is switched off to match (both views).
+   */
+  function setSun(az, el, { farBlocked = false } = {}) {
     directionFromAzEl(az, el, sunDir);
     sunEl = el;
-    applyExposure();
+    sunFarBlocked = farBlocked;
     sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
     sun.target.position.set(0, 0, 0);
+    applyExposure();
     return { renderBlocked: blockedToward(terrain, eye, sunDir) };
   }
 
@@ -243,7 +248,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
    */
   function applyExposure() {
     if (view !== 'surface') {
-      sun.intensity = MAP_SUN_INTENSITY; sun.color.set(0xffe2b0);
+      sun.intensity = sunFarBlocked ? 0 : MAP_SUN_INTENSITY; sun.color.set(0xffe2b0);
       fill.intensity = 0.5; fill.color.set(0x4a5c96);
       flood.intensity = 0;
       earthLight.intensity = 0;

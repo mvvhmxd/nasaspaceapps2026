@@ -75,12 +75,25 @@ describe('campaign', () => {
         const s = load(id);
         expect(validStartDays(s, m.config.missionHours)).toBeGreaterThanOrEqual(10);
         expect(s.illustrative).toBe(false);
-        expect(s.terrain.real).toBe(true);
-        expect(s.maskSource).toBe('lola-wide');
         expect(s.horizonMask).toHaveLength(360);
-        expect(s.sky.real).toBe(true);
-        expect(s.sky.validation.sunMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);
-        expect(s.sky.validation.earthMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);
+        expect(s.source).toMatch(/LOLA/);
+        expect(s.source).toMatch(/Horizons/);
+        if (s.sky) {
+          // Sites from pipeline/ (SPICE sky) carry their Horizons check; Dev 1's sites take the sky from Horizons directly.
+          expect(s.terrain.real).toBe(true);
+          expect(s.sky.validation.sunMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);
+          expect(s.sky.validation.earthMaxSeparationDeg).toBeLessThanOrEqual(s.sky.validation.toleranceDeg);
+        }
+      }
+    }
+  });
+
+  it('every site in a mission shares the same start time and length', () => {
+    for (const m of MISSIONS) {
+      const sites = m.siteIds.map(load);
+      for (const s of sites) {
+        expect(s.series.startUtc).toBe(sites[0].series.startUtc);
+        expect(s.hours).toBe(sites[0].hours);
       }
     }
   });
