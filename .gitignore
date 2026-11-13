@@ -1,0 +1,24 @@
+# Installed agent skills: restore with `npx skills experimental_install` (from skills-lock.json)
+.claude/skills/
+.claude/settings.local.json
+
+# Node / build
+node_modules/
+dist/
+.vercel/
+.env
+.env.*
+
+# Python / data pipeline
+__pycache__/
+.venv/
+data/raw/
+*.spice
+*.bsp
+*.tpc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
