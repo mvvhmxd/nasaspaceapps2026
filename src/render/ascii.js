@@ -159,8 +159,8 @@ const AsciiShader = {
 
 /**
  * Create the pass. Call `setSize(widthPx, heightPx)` with drawing-buffer pixels
- * whenever the renderer resizes, and `setCell(cssPx, pixelRatio)` to change density
- * (rebuilds the atlas so glyphs stay crisp).
+ * whenever the renderer resizes, and `setCell(cssPx, pixelRatio, glyphs?)` to change
+ * density or ramp length (rebuilds the atlas so glyphs stay crisp).
  */
 export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {}) {
   const pass = new ShaderPass(AsciiShader);
@@ -175,7 +175,8 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
       pass.uniforms.dots.value = on ? 1 : 0;
       pass.uniforms.emptyColor.value.set(on ? '#060a1c' : PALETTE.navy); // deep navy behind the dots
     },
-    setCell(css, dpr) {
+    setCell(css, dpr, count = glyphs) {
+      glyphs = count;
       const cellPx = Math.max(4, Math.round(css * dpr));
       atlas?.texture.dispose();
       atlas = buildGlyphAtlas({ count: glyphs, cellPx });

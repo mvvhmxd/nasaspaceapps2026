@@ -51,6 +51,12 @@ button {
 }
 button:hover { border-color: var(--grey); }
 button.on { border-color: var(--amber); color: var(--amber); }
+select {
+  font: inherit; color: var(--grey); background: var(--navy);
+  border: 1px solid rgba(201, 206, 214, 0.35); border-radius: 4px; padding: 3px 6px; cursor: pointer;
+}
+select:hover { border-color: var(--grey); }
+button:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 @media (max-width: 600px) {
   .top-right { top: auto; bottom: 64px; }
