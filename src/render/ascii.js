@@ -2,6 +2,8 @@
 // target (one texel per glyph-cell corner, see cellGrid.js), then one full-screen
 // pass turns each cell into a tinted glyph straight on the canvas, converting
 // to the output colour space itself. The HUD is DOM and never goes through it.
+// Dots mode (the rover's surface view): one halftone dot per cell instead of a
+// glyph, for a perspective camera; the cell grid stays on the screen there.
 import * as THREE from 'three';
 import { PALETTE } from '../theme.js';
 import { cellTargetLayout, cellTargetFrustum } from './cellGrid.js';
@@ -89,6 +91,7 @@ const glyphFragment = /* glsl */ `
   uniform vec3 shadowColor;
   uniform vec3 sunColor;
   uniform vec3 emptyColor;
+  uniform float dots;         // 1 = halftone dots sized by brightness (surface view)
   // Contours: cellContourInk mirrors cellContours() in contours.js.
   uniform float contourOn;
   uniform float minM;
@@ -217,6 +220,24 @@ const glyphFragment = /* glsl */ `
 
       float idx = floor(lum * (glyphCount - 1.0) + 0.5);
       vec2 local = fract(p / cell);
+      if (dots > 0.5) {
+        // Halftone: one round dot per cell, radius grows with brightness, keeping the scene's
+        // own colour, so the ground reads as game state: amber = sunlight (charging), blue =
+        // shadow (draining), white = the rover's floodlight. Coloured things (Earth) keep theirs.
+        float dl = smoothstep(0.03, 0.85, y);
+        float radius = 0.52 * sqrt(dl);
+        float edge = 1.0 / cell;
+        float dotInk = (1.0 - smoothstep(radius - edge, radius + edge, length(local - 0.5))) * step(0.02, dl);
+        float maxc = max(scene.r, max(scene.g, scene.b));
+        float minc = min(scene.r, min(scene.g, scene.b));
+        float chroma = (maxc - minc) / max(maxc, 0.001);
+        vec3 hue = scene / max(maxc, 0.001);
+        hue = mix(vec3(dot(hue, LUMA)), hue, 1.0 + 0.6 * (1.0 - chroma)); // push faint tints further apart
+        vec3 dotColor = clamp(hue, 0.0, 1.0) * mix(0.62, 1.0, dl);
+        gl_FragColor = vec4(mix(emptyColor, dotColor, dotInk), 1.0);
+        #include <colorspace_fragment>
+        return;
+      }
       vec2 glyphUv = vec2((idx + local.x) / glyphCount, local.y);
       float ink = texture(tGlyph, glyphUv).r;
 
@@ -294,6 +315,7 @@ export function createAsciiRenderer(
       shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
       sunColor: { value: new THREE.Color(PALETTE.amber) },
       emptyColor: { value: new THREE.Color(PALETTE.navy) },
+      dots: { value: 0 },
       contourOn: { value: contoursOn ? 1 : 0 },
       minM: { value: contours?.minM ?? 0 },
       maxM: { value: Math.max(contours?.maxM ?? 1, (contours?.minM ?? 0) + 1) },
@@ -319,6 +341,7 @@ export function createAsciiRenderer(
   const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
   const terrainCamera = new THREE.OrthographicCamera();
+  const perspectiveCamera = new THREE.PerspectiveCamera();
   const clearColor = new THREE.Color();
   const navy = new THREE.Color(PALETTE.navy);
   let atlas = null;
@@ -338,32 +361,55 @@ export function createAsciiRenderer(
       material.uniforms.minorHalfWidth.value = Math.max(1, cellPx * MINOR_STROKE_PER_CELL) / 2;
       material.uniforms.majorHalfWidth.value = Math.max(1.6, cellPx * MAJOR_STROKE_PER_CELL) / 2;
     },
+    /** Halftone dots (surface view) instead of glyphs; contours are off there. */
+    setDots(on) {
+      material.uniforms.dots.value = on ? 1 : 0;
+      material.uniforms.contourOn.value = on ? 0 : contoursOn ? 1 : 0;
+      material.uniforms.emptyColor.value.set(on ? '#060a1c' : PALETTE.navy); // deep navy behind the dots
+    },
     render(scene, camera, bufW, bufH, gridOffset, layer = 0) {
       const cellPx = material.uniforms.cell.value;
       const layout = cellTargetLayout(bufW, bufH, cellPx);
       if (target.width !== layout.width || target.height !== layout.height) {
         target.setSize(layout.width, layout.height); // only on resize / cell change
       }
-      const f = cellTargetFrustum(camera, bufH, cellPx, gridOffset, layout);
-      terrainCamera.left = f.left;
-      terrainCamera.right = f.right;
-      terrainCamera.top = f.top;
-      terrainCamera.bottom = f.bottom;
-      terrainCamera.near = camera.near;
-      terrainCamera.far = camera.far;
-      terrainCamera.zoom = 1;
-      terrainCamera.position.copy(camera.position);
-      terrainCamera.quaternion.copy(camera.quaternion);
-      terrainCamera.layers.set(layer);
-      terrainCamera.updateProjectionMatrix();
-      terrainCamera.updateMatrixWorld();
+      let cam;
+      if (camera.isPerspectiveCamera) {
+        // Same corner alignment through a view offset: texel i is centred on screen
+        // pixel i*cell - ox (bottom-up), i.e. the target covers [-cell/2 - ox, ...).
+        const p = perspectiveCamera;
+        p.fov = camera.fov; p.aspect = camera.aspect; p.near = camera.near; p.far = camera.far; p.zoom = camera.zoom;
+        const x = -0.5 * cellPx - gridOffset[0];
+        const yBottom = -0.5 * cellPx - gridOffset[1];
+        const w = layout.width * cellPx;
+        const h = layout.height * cellPx;
+        p.setViewOffset(bufW, bufH, x, bufH - (yBottom + h), w, h); // offset y counts from the top
+        p.position.copy(camera.position);
+        p.quaternion.copy(camera.quaternion);
+        cam = p;
+      } else {
+        const f = cellTargetFrustum(camera, bufH, cellPx, gridOffset, layout);
+        terrainCamera.left = f.left;
+        terrainCamera.right = f.right;
+        terrainCamera.top = f.top;
+        terrainCamera.bottom = f.bottom;
+        terrainCamera.near = camera.near;
+        terrainCamera.far = camera.far;
+        terrainCamera.zoom = 1;
+        terrainCamera.position.copy(camera.position);
+        terrainCamera.quaternion.copy(camera.quaternion);
+        terrainCamera.updateProjectionMatrix();
+        cam = terrainCamera;
+      }
+      cam.layers.set(layer);
+      cam.updateMatrixWorld();
 
       // Terrain into the target, cleared to transparent so empty space is known.
       renderer.getClearColor(clearColor);
       const clearAlpha = renderer.getClearAlpha();
       renderer.setRenderTarget(target);
       renderer.setClearColor(navy, 0);
-      renderer.render(scene, terrainCamera);
+      renderer.render(scene, cam);
       renderer.setRenderTarget(null);
       renderer.setClearColor(clearColor, clearAlpha);
 

@@ -16,7 +16,12 @@ export function curvatureDrop(d) {
   return (d * d) / (2 * MOON_RADIUS_M);
 }
 
-/** Bilinear terrain height (m) at world (x, z); NaN outside the grid. */
+/**
+ * Terrain height (m) at world (x, z); NaN outside the grid. Interpolates on the
+ * same two triangles per cell that the render mesh draws (split along the
+ * north-east to south-west diagonal; see src/render/terrain.js), so the sim's
+ * horizon and the rendered shadows come from one surface.
+ */
 export function heightAt(hm, x, z) {
   const half = (hm.size - 1) / 2;
   const gx = x / hm.spacingM + half; // column
@@ -32,7 +37,9 @@ export function heightAt(hm, x, z) {
   const b = h[r0 * n + c0 + 1];
   const c = h[(r0 + 1) * n + c0];
   const d = h[(r0 + 1) * n + c0 + 1];
-  return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
+  // a = (r0, c0), b = (r0, c0 + 1), c = (r0 + 1, c0), d = (r0 + 1, c0 + 1)
+  if (fx + fz <= 1) return a + (b - a) * fx + (c - a) * fz;
+  return d + (c - d) * (1 - fx) + (b - d) * (1 - fz);
 }
 
 /** World height of the observer's eye (m): ground at the centre plus mast height. */
@@ -41,21 +48,46 @@ export function observerEyeHeight(hm, observerHeightM = 2) {
 }
 
 /**
- * Horizon mask with one value per whole-degree azimuth (index i = azimuth i deg).
- * Marches each azimuth outward from the centre until the edge of the grid.
+ * Distances (m) along a ray from the centre where it crosses a mesh edge: grid
+ * columns, grid rows and the cells' NE-SW diagonals. Along the ray the mesh
+ * height is linear between these points, so the elevation angle peaks at one of
+ * them; checking them all gives the exact horizon of the drawn surface.
  */
-export function computeMask(hm, { observerHeightM = 2, bins = 360, stepFactor = 0.5 } = {}) {
+function edgeCrossings(hm, ex, nz) {
+  const half = (hm.size - 1) / 2;
+  const s = hm.spacingM;
+  const out = [];
+  // column index gx = half + ex*d/s, row index gz = half - nz*d/s, diagonal gx + gz = integer
+  for (const rate of [ex / s, -nz / s, (ex - nz) / s]) {
+    if (Math.abs(rate) < 1e-12) continue;
+    const base = rate === (ex - nz) / s ? 2 * half : half;
+    const lo = rate > 0 ? Math.floor(base) + 1 : Math.ceil(base) - 1;
+    const stepK = rate > 0 ? 1 : -1;
+    for (let k = lo; ; k += stepK) {
+      const d = (k - base) / rate;
+      if (d > hm.size * s * 1.5) break;
+      out.push(d);
+    }
+  }
+  return out;
+}
+
+/**
+ * Horizon mask with one value per whole-degree azimuth (index i = azimuth i deg):
+ * the highest elevation angle of the mesh surface along each azimuth, out to
+ * the edge of the grid.
+ */
+export function computeMask(hm, { observerHeightM = 2, bins = 360 } = {}) {
   const eye = observerEyeHeight(hm, observerHeightM);
-  const step = hm.spacingM * stepFactor;
   const mask = new Array(bins);
   for (let i = 0; i < bins; i++) {
     const az = (i * 360) / bins;
     const ex = Math.sin(az * DEG); // east component
     const nz = Math.cos(az * DEG); // north component
     let best = -90;
-    for (let d = step; ; d += step) {
+    for (const d of edgeCrossings(hm, ex, nz)) {
       const h = heightAt(hm, ex * d, -nz * d);
-      if (Number.isNaN(h)) break;
+      if (Number.isNaN(h)) continue;
       const el = Math.atan2(h - curvatureDrop(d) - eye, d) / DEG;
       if (el > best) best = el;
     }

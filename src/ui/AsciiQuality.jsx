@@ -1,5 +1,5 @@
 // ASCII quality control: High / Balanced / Performance / Off. The scene owns the
-// current value and reports changes (including the `A` key and low-fps steps).
+// current value and reports changes (including the `G` key and low-fps steps).
 import { memo } from 'react';
 import { QUALITY_ORDER, QUALITY_PRESETS, AUTO_FLOOR } from '../render/quality.js';
 
@@ -12,7 +12,7 @@ function AsciiQuality({ ascii, onChange }) {
           {QUALITY_ORDER.map((q) => <option key={q} value={q}>{QUALITY_PRESETS[q].label}</option>)}
         </select>
       </label>
-      <div id="ascii-hint" className="dim">Press A to switch ASCII on or off</div>
+      <div id="ascii-hint" className="dim">Press G to switch ASCII on or off</div>
       {ascii.reason === 'auto' && (
         <div className="dark" role="status">
           Low fps: lowered to {QUALITY_PRESETS[ascii.quality].label}.

@@ -41,18 +41,11 @@
 .hs-body[data-pinned='above'] .hs-pin-up,
 .hs-body[data-pinned='below'] .hs-pin-down { display: inline; }
 
-/* Too narrow to fit between the two top panels: move to the bottom right, above
-   the time controls and beside the map key, so it never covers the lander and
-   its pointers in the middle of the map. */
+/* Below 1100 px there is no room between the mission screens' left panels
+   (~500 px wide) and the right panel: anywhere else the strip would cover the
+   lander and its pointers at the centre of the map, or the bottom bar. It hides;
+   the HUD text, the compass and the map pointers carry the same Sun / Earth state. */
 @media (max-width: 1099px) {
-  .horizon-strip {
-    top: auto; bottom: 76px; left: auto; right: 12px; transform: none;
-    width: min(520px, calc(100% - 536px)); /* the map key is ~500 px wide on the left */
-  }
-}
-/* No room beside the map key: hide it (the HUD text and the map pointers carry
-   the same Sun / Earth state). */
-@media (max-width: 879px) {
   .horizon-strip { display: none; }
 }
 /* Narrower strip: the "hourly data, motion smoothed" note goes on its own line
