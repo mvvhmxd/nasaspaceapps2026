@@ -1,6 +1,6 @@
 # Surface view
 
-**Status:** designed · **Updated:** 2026-11-13 · [GDD](../../GDD.md)
+**Status:** in progress · **Updated:** 2026-11-13 · [GDD](../../GDD.md) · [Implementation](implementation.md) · [Testing](testing.md)
 
 The main screen. The real terrain around the landing site, built from LOLA, is lit by a single low Sun whose direction comes from the hourly Horizons series, so shadows sweep across craters as time runs. It is drawn through a coloured ASCII shader for the game's look. Top-down shows the terrain, shadows and lander as a map; the hero camera drops low behind the lander to show the Sun and Earth sitting on the real horizon. Pillars: *Real sky, real stakes* and *Readable in 3 seconds*.
 
@@ -34,3 +34,4 @@ The main screen. The real terrain around the landing site, built from LOLA, is l
 
 ## History
 - 2026-11-13: designed.
+- 2026-11-13: M1 scene proof built (terrain, Sun shadows, lander shadow state, top-down camera); see implementation.md for what is still missing.

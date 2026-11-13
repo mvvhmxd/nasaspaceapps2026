@@ -1,6 +1,6 @@
 # Crater Expectations — Game Design Document
 
-**Version:** 0.1 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log)
+**Version:** 0.2 (draft, open to change) · **Updated:** 2026-11-13 · [Features](#feature-index) · [Decisions](#decisions) · [Change log](#change-log) · [Architecture](ARCHITECTURE.md)
 
 ## Summary
 You are the mission planner for a small lander going to the Moon's south pole. You choose where and when to land, plan the work around when the Sun and Earth are up, then watch the mission play out on real terrain while the battery drains in every shadow. A launch delay can change the sky and force you to replan. A mission ends when you survive the full window (stars for science collected compared with the best possible plan) or when the battery hits zero.
@@ -11,7 +11,7 @@ You are the mission planner for a small lander going to the Moon's south pole. Y
 | Audience | Public, students and hackathon judges; casual. Also a "planner view" with raw numbers for experts |
 | Platforms and input | Desktop browser, mouse and keyboard [ASSUMPTION: no mobile] |
 | Session | One mission in 3 to 5 min; 3 missions about 15 min |
-| Engine | Vite + React (UI) + three.js (scene) [ASSUMPTION: version pinned at scaffold] |
+| Engine | Vite 8 + React 19 (UI) + three.js 0.187 (scene); see [Architecture](ARCHITECTURE.md) |
 | Scope | Hackathon build, NASA Space Apps Cairo, 14-15 Nov 2026 |
 | References | *FTL* (plan, then live with the consequences), *Mini Metro* (a clean, readable map), *Frostpunk* (a resource that drains when the environment turns) |
 
@@ -37,7 +37,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 |---|---|---|---|---|
 | Site planner | designed | MVP | Pick site + landing date; preview sun hours, Earth hours, longest dark; compare 3 side by side | [design](features/site-planner/design.md) |
 | Survival sim | designed | MVP | Hour-by-hour battery and comms from the real sun/Earth series; win by surviving, score by science | [design](features/survival-sim/design.md) |
-| Surface view | designed | MVP | Three.js LOLA terrain, Sun as shadow-casting light, Earth in sky, ASCII shader, two cameras | [design](features/surface-view/design.md) |
+| Surface view | in progress | MVP | Three.js LOLA terrain, Sun as shadow-casting light, Earth in sky, ASCII shader, two cameras | [design](features/surface-view/design.md) |
 | Launch slip | idea | MVP | A delay of 3 to 12 days moves the landing date; 60 s to re-pick site or date | — |
 | Debrief | idea | MVP | Survived or not, stars, your plan vs the best plan, "How it works" panel with the Horizons check | — |
 | Data pipeline | idea | MVP | Offline Python: LOLA crop → horizon mask → Horizons sun/Earth series → site JSON | — |
@@ -49,7 +49,8 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 | Planner mode | idea | stretch | No game wrapper: enter constraints and get the best site and date from the solver | — |
 
 ## Milestones
-1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge.
+1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge. *Built on the illustrative demo site 2026-11-13; the real-data half waits for the pipeline.*
+1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps.
 2. **M2, the loop in grey:** site planner + survival sim + launch slip + debrief, 1 mission, 3 sites · done when: a teammate plays start to restart without help.
 3. **M3, identity:** ASCII shader, colours, both cameras, missions 1 and 2 · done when: the M2 run looks like the target style at 60 fps on a team laptop.
 4. **M4, ship:** Horizons check shown in the debrief, deployed public link, demo script · done when: the link works in a private window on another machine.
@@ -69,6 +70,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 | D-001 | 2026-11-13 | Core = planning (Slip) + scheduling (Window) + survival (Ice Run) as phases of one mission, with missions as levels | Rover-only game; pure planning tool; fixed puzzle levels | Scores high on all five judging criteria; puts every challenge objective in the loop | All |
 | D-002 | 2026-11-13 | Surface view is 3D three.js with detailed coloured ASCII; must ship | 2D sky strip only | Team wants it; it is the project's visual identity | Surface view |
 | D-003 | 2026-11-13 | Two cameras: top-down default, hero on `V` | Top-down only; hero only | Top-down reads shadows and routes; hero shows Sun and Earth against the horizon | Surface view |
+| D-004 | 2026-11-13 | ASCII pass moves from M3 to right after M1 (M1b) | Keep it in M3 after the grey loop | The team wants the ASCII look as the game's identity from the start; it is also the biggest frame-rate risk, so find out early | Milestones, surface view |
 
 ## Open questions
 - **Assumptions to confirm:** desktop only; engine versions; all `[ASSUMPTION]` values in the feature notes; the 3 sites and their coordinates.
@@ -80,3 +82,4 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 
 ## Change log
 **0.1 (2026-11-13):** first draft from the planning chat; site planner, survival sim and surface view designed; D-001 to D-003 logged.
+**0.2 (2026-11-13):** M1 scene proof built ([surface view](features/surface-view/implementation.md)); [Architecture](ARCHITECTURE.md) added with the site data format; M1b added and D-004 logged.
