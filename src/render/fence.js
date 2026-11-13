@@ -9,9 +9,10 @@
 //
 // States: inside -> outside (warning, 5 s countdown) -> returning (glide to the
 // landing site, or a snap with reduced motion) -> inside. Moving back inside
-// during the countdown cancels it. Any user input during the glide cancels the
-// glide (never fight the player); if the view is still outside, a fresh countdown
-// starts on the next tick.
+// during the countdown cancels it. Never fight the player: while they hold a drag
+// or zoom the countdown waits at 1 s and the glide never starts, and touching the
+// controls during a glide cancels it; if the view is still outside afterwards, a
+// fresh countdown starts on the next tick.
 
 export const FENCE_COUNTDOWN_MS = 5000;
 export const FENCE_GLIDE_MS = 800;
@@ -39,6 +40,7 @@ export function createFence({
   let deadline = 0;
   let glideStart = 0;
   let from = { x: 0, z: 0 };
+  let held = false; // the player is holding a drag / zoom right now
 
   const fence = {
     reducedMotion,
@@ -55,6 +57,7 @@ export function createFence({
         if (outsideBy(x, z, half) > 0) { state = 'outside'; deadline = now + countdownMs; }
       } else if (state === 'outside') {
         if (outsideBy(x, z, half) === 0) state = 'inside';
+        else if (held) deadline = Math.max(deadline, now + 1000); // wait at "1" until they let go
         else if (now >= deadline) {
           if (fence.reducedMotion) { state = 'inside'; target = { ...home }; }
           else { state = 'returning'; glideStart = now; from = { x, z }; }
@@ -72,6 +75,12 @@ export function createFence({
     /** The player touched the controls: stop any glide where it is. */
     userInput() {
       if (state === 'returning') state = 'inside'; // next tick re-checks, new countdown if still outside
+    },
+
+    /** Drag / zoom started (true) or ended (false). Starting also stops a glide. */
+    setHeld(on) {
+      held = !!on;
+      if (held) fence.userInput();
     },
   };
   return fence;

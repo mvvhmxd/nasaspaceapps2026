@@ -15,9 +15,12 @@ export const RELAX_FRAMES = 120; // about 2 s at 60 Hz before stepping back up
 export const MAX_STRIDE = 4; // shadows at no less than a quarter of the frame rate
 
 /**
- * Estimates the display refresh interval from requestAnimationFrame deltas: the
- * 25th percentile of the last `size` deltas (frames are quantised to the refresh,
- * so a low percentile is the interval itself; occasional long frames do not move it).
+ * Estimates the frame interval the page normally reaches, from requestAnimationFrame
+ * deltas: the 25th percentile of the last `size` deltas. When only some frames are
+ * slow (the shadow frames), that is the display refresh interval, which is the case
+ * the shadow stride is for. When every frame is slow (GPU-bound even without
+ * shadows) it follows the slower rate instead, and the stride relaxes, which is
+ * fine there because shadows are not the bottleneck.
  */
 export function createRefreshEstimator({ size = 90, fallbackMs = 1000 / 60 } = {}) {
   const deltas = [];

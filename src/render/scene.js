@@ -108,8 +108,11 @@ export function createSurfaceScene(
   // Signal fence: if the view centre leaves the surveyed square, warn, count down
   // 5 s, then glide back to the landing site. Never touches the sim.
   const fence = createFence({ half: extentM / 2, reducedMotion });
-  const onControlsStart = () => fence.userInput(); // never fight the player's drag or zoom
+  // Never fight the player: no return glide while a drag / zoom is held.
+  const onControlsStart = () => fence.setHeld(true);
+  const onControlsEnd = () => fence.setHeld(false);
   controls.addEventListener('start', onControlsStart);
+  controls.addEventListener('end', onControlsEnd);
   let fenceShown = { state: 'inside', secondsLeft: 0 };
   function updateFence(now) {
     const t = controls.target;
@@ -338,6 +341,7 @@ export function createSurfaceScene(
       window.removeEventListener('keydown', onKey);
       ro.disconnect();
       controls.removeEventListener('start', onControlsStart);
+      controls.removeEventListener('end', onControlsEnd);
       controls.dispose();
       ascii.dispose();
       skyMarkers.dispose();

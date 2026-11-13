@@ -108,4 +108,33 @@ describe('fence state machine', () => {
     r = f.tick(r.target.x, 0, FENCE_COUNTDOWN_MS + 416);
     expect(r).toEqual({ state: 'inside', secondsLeft: 0, target: null });
   });
+
+  it('never glides while the player holds a drag: waits at 1 s, then returns after release', () => {
+    const f = createFence({ half: 1000 });
+    f.tick(1500, 0, 0); // outside, countdown starts
+    f.setHeld(true);
+    let r;
+    for (let t = 0; t <= 12000; t += 250) {
+      r = f.tick(1500, 0, t);
+      expect(r.state).toBe('outside');
+      expect(r.target).toBeNull();
+      expect(r.secondsLeft).toBeGreaterThanOrEqual(1);
+    }
+    expect(r.secondsLeft).toBe(1);
+    f.setHeld(false);
+    expect(f.tick(1500, 0, 12500).state).toBe('outside'); // short grace after release
+    r = f.tick(1500, 0, 13100);
+    expect(r.state).toBe('returning');
+    expect(r.target).not.toBeNull();
+  });
+
+  it('pressing the controls mid-glide stops it (drag start counts as input)', () => {
+    const f = createFence({ half: 1000 });
+    f.tick(1500, 0, 0);
+    expect(f.tick(1500, 0, FENCE_COUNTDOWN_MS).state).toBe('returning');
+    f.setHeld(true);
+    const r = f.tick(1400, 0, FENCE_COUNTDOWN_MS + 100);
+    expect(r.state).toBe('outside'); // fresh countdown, no glide target
+    expect(r.target).toBeNull();
+  });
 });
