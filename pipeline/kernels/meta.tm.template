@@ -1,0 +1,20 @@
+KPL/MK
+
+Meta-kernel template. Copy to meta.tm (git-ignored) and adjust PATH_VALUES
+if data/raw/ lives elsewhere. Paths are relative to the pipeline/ folder.
+File names are TODO until 01_download_kernels.py pins exact versions.
+
+\begindata
+
+PATH_VALUES  = ( 'data/raw/kernels' )
+PATH_SYMBOLS = ( 'K' )
+
+KERNELS_TO_LOAD = (
+   '$K/naif0012.tls'
+   '$K/pck00011.tpc'
+   '$K/de440.bsp'
+   '$K/moon_pa_de440_200625.bpc'
+   '$K/moon_de440_250416.tf'
+)
+
+\begintext

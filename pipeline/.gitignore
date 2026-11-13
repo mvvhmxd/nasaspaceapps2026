@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+data/raw/
+*.bsp
+*.tpc
+*.tls
+*.tf
+*.bpc
+*.tif
+*.img
+*.lbl
+kernels/meta.tm

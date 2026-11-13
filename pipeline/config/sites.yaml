@@ -1,0 +1,18 @@
+# Placeholder sites. Real picks are pending (see NOTES_FOR_TEAM.md #4).
+# lat/lon in degrees, planetocentric, east-positive.
+sites:
+  - id: site_a
+    name: TODO
+    lat: null
+    lon: null
+    source: TODO
+  - id: site_b
+    name: TODO
+    lat: null
+    lon: null
+    source: TODO
+  - id: site_c
+    name: TODO
+    lat: null
+    lon: null
+    source: TODO
