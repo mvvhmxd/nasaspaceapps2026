@@ -50,7 +50,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 
 ## Milestones
 1. **M1, scene proof:** surface view with real terrain for 1 site, Sun light moving by the hour, plain shading · done when: the lander shows red in shadow at an hour where Horizons puts the Sun behind a ridge. *Built on the illustrative demo site 2026-11-13; the real-data half waits for the pipeline.*
-1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps. *Built 2026-11-13; the 60 fps half still needs a real-GPU reading.*
+1b. **M1b, ASCII look:** the coloured ASCII pass on the M1 scene · done when: the two M1 screenshots read as clearly in ASCII at 60 fps. *Done 2026-11-13: 144 fps with ASCII on, on the lead's laptop.*
 2. **M2, the loop in grey:** site planner + survival sim + launch slip + debrief, 1 mission, 3 sites · done when: a teammate plays start to restart without help.
 3. **M3, identity:** ASCII shader, colours, both cameras, missions 1 and 2 · done when: the M2 run looks like the target style at 60 fps on a team laptop.
 4. **M4, ship:** Horizons check shown in the debrief, deployed public link, demo script · done when: the link works in a private window on another machine.
@@ -75,7 +75,7 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 ## Open questions
 - **Assumptions to confirm:** desktop only; engine versions; all `[ASSUMPTION]` values in the feature notes; the 3 sites and their coordinates.
 - **Risks:**
-  - *Tech:* ASCII shader + shadows at 60 fps (find out at M1/M3 on the slowest team laptop).
+  - *Tech:* ASCII shader + shadows at 60 fps: 144 fps on the lead's laptop (M1b); confirm on the slowest team laptop at M3.
   - *Data:* the Horizons series for a surface site, and the LOLA horizon, must match (the M1 done-when test).
   - *Design:* is watching the survival phase fun, or dead time? (playtest at M2; fallback: faster time, more events).
   - *Scope:* local event end time not known yet; see `JAM.md`.
@@ -83,4 +83,4 @@ Brief → Plan site + date → (Schedule tasks) → Survive the window → Debri
 ## Change log
 **0.1 (2026-11-13):** first draft from the planning chat; site planner, survival sim and surface view designed; D-001 to D-003 logged.
 **0.2 (2026-11-13):** M1 scene proof built ([surface view](features/surface-view/implementation.md)); [Architecture](ARCHITECTURE.md) added with the site data format; M1b added and D-004 logged.
-**0.3 (2026-11-13):** M1b ASCII pass built ([surface view](features/surface-view/design.md), ramp and cell size changed).
+**0.3 (2026-11-13):** M1b ASCII pass built ([surface view](features/surface-view/design.md), ramp and cell size changed); 144 fps measured in a real browser, M1b done.

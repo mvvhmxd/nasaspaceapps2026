@@ -11,6 +11,6 @@ Run: `npm test` (Vitest, Node, no WebGL). Browser checks: `npm run dev`, open `h
 - [x] Lander is grey with long shadows at a sunlit hour, red at a shadowed hour, and the HUD "render check" says agrees *(browser check 2026-11-13: headless Chrome 1440×900, `?h=200` sunlit and `?h=50` shadow)*
 - [x] Terrain covers the whole canvas at 16:10 with north up *(browser check 2026-11-13, same screenshots)*
 - [x] ASCII pass: lit slopes show dense amber glyphs, shadow stays navy with sparse glyphs, the lander is drawn sharp, and the render check still agrees *(browser check 2026-11-13: headless Chrome 1440×900, `?h=200` and `?h=50` at cell 8 and 12; no shader errors in the console)*
-- [ ] 60 fps on a team laptop with the ASCII pass on *(not proven: headless Chrome uses a software renderer; read the HUD fps counter in a real browser)*
+- [x] 60 fps on a team laptop with the ASCII pass on *(browser check 2026-11-13: HUD counter read 144 fps at `?h=200` with ASCII on, 1280×600 window, on the lead's laptop; still to be read on the slowest team laptop)*
 - [ ] `A` toggles the pass and three sub-30 fps readings switch it off with the HUD note *(not proven: needs a real browser session)*
 - [ ] Hero camera, compass ring, Earth sprite, camera transition *(not built yet)*
