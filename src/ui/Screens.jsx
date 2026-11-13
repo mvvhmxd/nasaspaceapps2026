@@ -1,6 +1,7 @@
 // Title, mission select, briefing, "How it works", credits and debrief panels. Display only.
 import { MISSIONS } from '../game/missions.js';
 import { isUnlocked } from '../game/progress.js';
+import { ASCII_QUALITY } from '../game/settings.js';
 
 export function Stars({ n }) {
   return (
@@ -20,7 +21,7 @@ export function SkyBadge({ site }) {
   );
 }
 
-export function Title({ onStart, onHelp, onCredits }) {
+export function Title({ onStart, onHelp, onCredits, onSettings }) {
   return (
     <div className="panel center" role="dialog" aria-label="Title">
       <h1>CRATER EXPECTATIONS</h1>
@@ -30,6 +31,7 @@ export function Title({ onStart, onHelp, onCredits }) {
       <div className="row">
         <button className="primary" onClick={onStart} autoFocus>Play</button>
         <button onClick={onHelp}>How it works</button>
+        <button onClick={onSettings}>Settings</button>
         <button onClick={onCredits}>Data and credits</button>
       </div>
     </div>
@@ -117,8 +119,40 @@ export function Credits({ sites, onClose }) {
       <p className="dim small">Checked {sites[0]?.sky?.validation?.checkedUtc} against the JPL Horizons API, tolerance {sites[0]?.sky?.validation?.toleranceDeg}&deg;. The sites are high points this team found by searching the LOLA terrain. They are not official or proposed landing sites.</p>
       <p><b>Terrain and horizons (real).</b> NASA LOLA gridded elevation, PDS data set {sites[0]?.terrain?.dataSet}, product version {sites[0]?.terrain?.productVersion}: {sites[0]?.terrain?.horizonProducts?.join(' and ')}. Frame: {sites[0]?.terrain?.frame?.toLowerCase()}. Resampled to a local east/north grid; horizon computed out to {sites[0]?.terrain?.horizonRangeKm} km for an observer {sites[0]?.terrain?.eyeHeightM} m above the surface.</p>
       <p><b>Challenge resources.</b> JPL Horizons, LROC QuickMap, NASA Moon Trek, Canadian Space Agency Moon exploration pages.</p>
+      <p><b>Sound.</b> All sounds are synthesised in the browser by this game&rsquo;s own code. No audio files or third-party assets are used.</p>
       <p><b>Built with.</b> React, three.js, Vite, SpiceyPy. AI coding assistance was used during development; see the team&rsquo;s AI use log.</p>
       <p className="dim small">Made for the NASA Space Apps Challenge 2026. Not affiliated with or endorsed by NASA.</p>
+      <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
+    </div>
+  );
+}
+
+export function Settings({ settings, onChange, onTest, onClose }) {
+  return (
+    <div className="panel center help" role="dialog" aria-label="Settings">
+      <h2>Settings</h2>
+      <div className="field">
+        <label htmlFor="vol">Sound volume: {Math.round(settings.volume * 100)}%</label>
+        <input id="vol" type="range" min="0" max="1" step="0.05" value={settings.volume}
+          onChange={(e) => onChange({ ...settings, volume: Number(e.target.value) })} />
+        <div className="row" style={{ marginTop: 0 }}>
+          <button aria-pressed={settings.muted} className={settings.muted ? 'on' : ''} onClick={() => onChange({ ...settings, muted: !settings.muted })}>
+            {settings.muted ? 'Muted' : 'Mute'}
+          </button>
+          <button onClick={onTest}>Test sound</button>
+        </div>
+        <div className="dim small">Every sound also appears as text in the event feed.</div>
+      </div>
+      <fieldset className="field">
+        <legend>ASCII terrain detail</legend>
+        <div className="choices" role="radiogroup" aria-label="ASCII terrain detail">
+          {ASCII_QUALITY.map((q) => (
+            <button key={q.id} role="radio" aria-checked={settings.ascii === q.id} className={settings.ascii === q.id ? 'on' : ''}
+              onClick={() => onChange({ ...settings, ascii: q.id })}>{q.label}</button>
+          ))}
+        </div>
+        <div className="dim small">Lower detail runs faster. The game switches ASCII off by itself if the frame rate drops too low.</div>
+      </fieldset>
       <div className="row"><button className="primary" onClick={onClose} autoFocus>Close</button></div>
     </div>
   );

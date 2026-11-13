@@ -6,10 +6,13 @@ import { createSurfaceScene } from './render/scene.js';
 import { MISSIONS, missionById } from './game/missions.js';
 import { loadProgress, saveProgress, recordStars, nextMissionId, isUnlocked } from './game/progress.js';
 import { dayStats, slipDay, starsFor, bestPlan, utcLabel } from './ui/gameHelpers.js';
-import { Title, MissionSelect, Brief, Help, Credits, Debrief, SkyBadge } from './ui/Screens.jsx';
+import { Title, MissionSelect, Brief, Help, Credits, Settings, Debrief, SkyBadge } from './ui/Screens.jsx';
 import Planner from './ui/Planner.jsx';
 import Schedule from './ui/Schedule.jsx';
 import { emptySchedule, planFrom } from './game/schedule.js';
+import { ASCII_QUALITY, loadSettings, saveSettings } from './game/settings.js';
+import { unlockAudio, setVolume, play } from './ui/audio.js';
+import Compass from './ui/Compass.jsx';
 import MissionHud, { MissionStatus } from './ui/MissionHud.jsx';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
@@ -28,8 +31,9 @@ export default function App() {
   const [sites, setSites] = useState(null); // { id: site }
   const [error, setError] = useState(null);
   const [screen, setScreen] = useState('title'); // title | missions | brief | planner | schedule | surface | debrief
-  const [overlay, setOverlay] = useState(null); // 'help' | 'credits' | null
+  const [overlay, setOverlay] = useState(null); // 'help' | 'credits' | 'settings' | null
   const [progress, setProgress] = useState(loadProgress);
+  const [settings, setSettings] = useState(loadSettings);
   const [missionId, setMissionId] = useState(MISSIONS[0].id);
   const [siteId, setSiteId] = useState(MISSIONS[0].siteIds[0]);
   const [day, setDay] = useState(0);
@@ -69,12 +73,31 @@ export default function App() {
     const s = createSurfaceScene(canvasRef.current, site, {
       onFps: setFps,
       onAsciiChange: setAsciiState,
-      cellCss: Number(params.get('cell')) || 10, // ?cell=8 for denser glyphs, 12 for bigger type
+      cellCss: ASCII_QUALITY.find((q) => q.id === settings.ascii)?.cell ?? 10,
+      autoOff: params.get('ascii') !== 'force', // ?ascii=force keeps the ASCII look on slow machines (demos, screenshots)
     });
-    if (params.get('ascii') === '0') s.setAscii(false);
+    if (params.get('ascii') === '0' || settings.ascii === 'off') s.setAscii(false);
     sceneRef.current = s;
     return () => { s.dispose(); sceneRef.current = null; };
   }, [site]);
+
+  // Apply settings: sound level now, ASCII detail on the live map, and save them.
+  useEffect(() => {
+    setVolume(settings.volume, settings.muted);
+    saveSettings(settings);
+    const q = ASCII_QUALITY.find((x) => x.id === settings.ascii);
+    if (!sceneRef.current || !q) return;
+    if (q.cell) sceneRef.current.setCell(q.cell);
+    sceneRef.current.setAscii(q.cell !== null && params.get('ascii') !== '0');
+  }, [settings]);
+
+  // Browsers only allow sound after a click or key press.
+  useEffect(() => {
+    const unlock = () => unlockAudio();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+  }, []);
 
   const missionSites = useMemo(() => (sites ? mission.siteIds.map((id) => sites[id]) : []), [sites, mission]);
   const statsBySite = useMemo(
@@ -126,6 +149,7 @@ export default function App() {
     setCountdown(null);
     setPlaying(true);
     setScreen('surface');
+    play('land');
   }
 
   function land() {
@@ -138,6 +162,7 @@ export default function App() {
         setDay(slipped);
         setCountdown(REPLAN_OVERRIDE ?? mission.replanSeconds);
         setScreen('planner');
+        play('slip');
         return; // back to the planner with the clock running
       }
     }
@@ -172,6 +197,9 @@ export default function App() {
       if (r.events.length) {
         eventsRef.current = [...eventsRef.current, ...r.events];
         setEvents(eventsRef.current);
+        // At 16x several events can land in one tick: play the two most important, not a pile-up.
+        const order = ['powerDown', 'success', 'battery10', 'battery25', 'sunset', 'earthset', 'sunrise', 'earthrise'];
+        [...new Set(r.events.map((e) => e.type))].sort((a, b) => order.indexOf(a) - order.indexOf(b)).slice(0, 2).forEach(play);
       }
       if (r.state.done) {
         const stars = starsFor(r.state, best.score, cfg.starThresholds);
@@ -247,10 +275,12 @@ export default function App() {
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}
             </div>
             <button onClick={() => setOverlay('help')}>How it works</button>
+            <button onClick={() => setOverlay('settings')}>Settings</button>
+            {(screen === 'planner' || screen === 'schedule' || screen === 'surface') && <Compass sky={sky} />}
           </div>
 
           {screen === 'title' && (
-            <Title onStart={() => setScreen('missions')} onHelp={() => setOverlay('help')} onCredits={() => setOverlay('credits')} />
+            <Title onStart={() => setScreen('missions')} onHelp={() => setOverlay('help')} onCredits={() => setOverlay('credits')} onSettings={() => setOverlay('settings')} />
           )}
           {screen === 'missions' && <MissionSelect progress={progress} onPick={pickMission} onBack={() => setScreen('title')} />}
           {screen === 'brief' && (
@@ -293,6 +323,9 @@ export default function App() {
           )}
           {overlay && <div className="scrim" onClick={() => setOverlay(null)} />}
           {overlay === 'help' && <Help onClose={() => setOverlay(null)} />}
+          {overlay === 'settings' && (
+            <Settings settings={settings} onChange={setSettings} onTest={() => { unlockAudio(); play('sunrise'); }} onClose={() => setOverlay(null)} />
+          )}
           {overlay === 'credits' && <Credits sites={Object.values(sites)} onClose={() => setOverlay(null)} />}
         </>
       )}

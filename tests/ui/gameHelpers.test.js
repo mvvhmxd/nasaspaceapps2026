@@ -7,6 +7,7 @@ import { nextChange, validStartDays, dayStats, slipDay, starsFor, bestPerRow, be
 import { initialState, advance } from '../../src/sim/survival.js';
 import { MISSIONS } from '../../src/game/missions.js';
 import { isUnlocked, recordStars, nextMissionId, sanitize } from '../../src/game/progress.js';
+import { sanitizeSettings, DEFAULTS } from '../../src/game/settings.js';
 
 const site = decodeSite(JSON.parse(readFileSync('public/sites/demo.json', 'utf8')));
 const H = SIM_CONFIG.missionHours;
@@ -123,5 +124,18 @@ describe('campaign', () => {
   it('sanitize drops unknown or malformed saved progress', () => {
     expect(sanitize(null)).toEqual({});
     expect(sanitize({ 'first-light': 3, 'call-home': 9, hacked: 3, 'long-shadow': '2' })).toEqual({ 'first-light': 3 });
+  });
+});
+
+describe('settings', () => {
+  it('falls back to defaults for missing or malformed values', () => {
+    expect(sanitizeSettings(null)).toEqual(DEFAULTS);
+    expect(sanitizeSettings({ volume: 'loud', muted: 1, ascii: 'ultra' })).toEqual(DEFAULTS);
+  });
+  it('keeps valid values and clamps the volume', () => {
+    expect(sanitizeSettings({ volume: 0.25, muted: true, ascii: 'off' })).toEqual({ volume: 0.25, muted: true, ascii: 'off' });
+    expect(sanitizeSettings({ volume: 7 }).volume).toBe(1);
+    expect(sanitizeSettings({ volume: -1 }).volume).toBe(0);
+    expect(sanitizeSettings({ volume: NaN }).volume).toBe(DEFAULTS.volume);
   });
 });

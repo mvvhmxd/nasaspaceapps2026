@@ -15,7 +15,7 @@ const SUN_DISTANCE = 60000; // m; far enough that the light covers the whole cro
 const SHARP_LAYER = 1; // objects drawn crisp on top of the ASCII terrain
 const FPS_FLOOR = 30; // three readings below this switch the ASCII pass off
 
-export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss = 10 } = {}) {
+export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss = 10, autoOff: autoOffEnabled = true } = {}) {
   const hm = site.heightmap;
   const extentM = (hm.size - 1) * hm.spacingM;
 
@@ -24,7 +24,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
   renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(PALETTE.navy);
+  renderer.setClearColor(PALETTE.navy, 0); // alpha 0 marks "no terrain" for the ASCII pass; the canvas itself is opaque
 
   const scene = new THREE.Scene();
 
@@ -150,7 +150,7 @@ export function createSurfaceScene(canvas, site, { onFps, onAsciiChange, cellCss
       last = now;
       if (asciiOn && !document.hidden) {
         lowFpsStreak = fps < FPS_FLOOR ? lowFpsStreak + 1 : 0;
-        if (lowFpsStreak >= 3) setAscii(false, 'auto');
+        if (autoOffEnabled && lowFpsStreak >= 3) setAscii(false, 'auto');
       }
     }
   });

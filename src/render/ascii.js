@@ -76,6 +76,7 @@ const AsciiShader = {
     contrastHi: { value: 0.8 },
     shadowColor: { value: new THREE.Color(PALETTE.navy).multiplyScalar(2.2) },
     sunColor: { value: new THREE.Color(PALETTE.amber) },
+    emptyColor: { value: new THREE.Color(PALETTE.navy) }, // drawn where there is no terrain
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -98,6 +99,7 @@ const AsciiShader = {
     uniform float contrastHi;
     uniform vec3 shadowColor;
     uniform vec3 sunColor;
+    uniform vec3 emptyColor;
     varying vec2 vUv;
 
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -105,7 +107,12 @@ const AsciiShader = {
     void main() {
       vec2 cellIndex = floor(gl_FragCoord.xy / cell);
       vec2 cellUv = (cellIndex + 0.5) * cell / resolution;
-      vec3 scene = texture(tDiffuse, cellUv).rgb;
+      vec4 texel = texture(tDiffuse, cellUv);
+      if (texel.a < 0.5) { // beyond the edge of the terrain: no glyphs
+        gl_FragColor = vec4(emptyColor, 1.0);
+        return;
+      }
+      vec3 scene = texel.rgb;
 
       // Linear -> perceptual, then a contrast curve so lit ground is dense and
       // shadow still shows sparse glyphs.
