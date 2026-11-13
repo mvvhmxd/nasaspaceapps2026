@@ -10,7 +10,8 @@
 | Build / bundler | Vite 8.3.8 |
 | Target runtime | Desktop browsers with WebGL2 [ASSUMPTION: no mobile] |
 | Key libraries | `three/addons/controls/MapControls.js` for pan and zoom |
-| Tests | Vitest 4.1.12 (`npm test`); the terrain and sim modules run in Node with no WebGL |
+| Tests | Vitest 4.1.12 (`npm test`); the sim, game and terrain modules run in Node with no WebGL. `pytest pipeline/tests` for the Python pipeline |
+| Data pipeline | Python 3.11+, SpiceyPy, NumPy, requests (offline, in `pipeline/`) |
 | Hosting | Static build (`dist/`), deploy target to be chosen (Vercel planned) |
 
 ## 2. Structure
@@ -25,7 +26,14 @@ public/sites/<id>.json ──loadSite──▶ site object
             │                           ▲
             └── setLanderInShadow(!sunlit) ──┘   (sim decides the colour)
 ```
-`App.jsx` owns the mission hour (slider, play, speed). Each change of hour calls `stateAt` and pushes the Sun direction and the lander colour into the scene. The render loop (`renderer.setAnimationLoop`) only draws and counts fps.
+`App.jsx` owns the screen flow (title, missions, brief, planner, schedule, surface, debrief) and the survival clock. Every 0.5 s tick calls `advance(site, state, speed, plan)`, which steps one hour at a time, so no hour or event is skipped at 4× or 16×. The hour shown on the map is the sim's hour while a mission runs and the planned landing hour otherwise. Each change of hour calls `stateAt` and pushes the Sun direction and the lander colour into the scene. The render loop (`renderer.setAnimationLoop`) only draws and counts fps.
+
+```
+planner ──► schedule ──► surface ──► debrief          (missions 2 and 3; mission 1 skips schedule)
+   ▲            │ Land
+   └── launch slip (mission 3): earlier days lock, 60 s countdown, then lands with the current schedule
+```
+The offline pipeline is separate: `pipeline/` turns LOLA and SPICE data into the site files and never runs in the browser.
 
 ## 3. Module map
 | Module / folder | Responsibility | Used by features |
@@ -37,15 +45,28 @@ public/sites/<id>.json ──loadSite──▶ site object
 | `src/render/sun.js` | `directionFromAzEl(az, el)` → world unit vector | surface view, tests |
 | `src/render/camera.js` | top-down orthographic camera, `fitTopDown` covers the screen | surface view |
 | `src/render/scene.js` | `createSurfaceScene(canvas, site)`: renderer, PCFSoft shadows, Sun light, lander, controls, fps | surface view |
+| `src/render/ascii.js` | coloured ASCII pass (glyph atlas sorted by ink coverage, full-screen shader); pixels with no terrain stay plain | surface view |
+| `src/sim/config.js` | `SIM_CONFIG`: game-balanced battery, drain, store and star thresholds | survival sim, planner |
+| `src/sim/survival.js` | `initialState`, `advance(site, state, hours, plan?)` → `{ state, events }`; `MODES` | survival sim, schedule forecast, solver |
+| `src/sim/planner.js` | `previewStats(site, startHour, lengthH, config)` for the preview card | site planner |
+| `src/sim/solver.js` | `bestStart(site, config, stride)`: best automatic-plan landing hour | debrief stars |
+| `src/game/missions.js` | the three missions: sites, length, slip, briefing text | campaign |
+| `src/game/schedule.js` | 6-hour blocks, `planFrom`, `blockSky`, `forecast` (runs `advance`) | task schedule |
+| `src/game/progress.js`, `settings.js` | stars per mission and player settings in `localStorage`, with sanitising | campaign, settings |
+| `src/ui/gameHelpers.js` | pure helpers: countdowns, valid days, slip, stars, `bestPlan` across sites | planner, debrief |
+| `src/ui/Screens.jsx`, `Planner.jsx`, `Schedule.jsx`, `MissionHud.jsx`, `Compass.jsx` | the screens; display and input only | all |
+| `src/ui/audio.js` | event sounds synthesised with Web Audio (no audio files) | survival, slip |
 | `src/theme.js` | `PALETTE` (navy, amber, teal, grey, red) | all UI and scene colours |
-| `src/App.jsx`, `src/styles.css` | hour control, HUD, Illustrative badge | debug HUD for M1; survival HUD later |
-| `scripts/make-demo-site.mjs` | writes the illustrative `public/sites/demo.json` | development |
+| `src/App.jsx`, `src/styles.css` | screen flow, survival clock, launch slip, settings wiring | all |
+| `scripts/make-demo-site.mjs` | writes the illustrative `public/sites/demo.json` (used by `tests/visibility.test.js` only) | development |
+| `pipeline/scripts/01`–`07`, `common.py` | kernels, DEM, local crop, ephemeris, horizon mask, Horizons validation, export (see `pipeline/README.md`) | real site files |
 
 ## 4. Cross-cutting conventions
 - **World axes:** x = east, y = up, z = south (metres), origin at the landing site's ground point. North is −z. The top-down camera shows north at the top of the screen.
 - **Angles:** azimuth clockwise from north in degrees; elevation in degrees above the local horizontal. `horizonMask[i]` is the terrain elevation at azimuth `i`°.
 - **Curvature:** both the mask and the terrain mesh drop the surface by `d² / 2R` with R = 1,737,400 m, so a ray from the lander and the mask agree.
-- **Config and tuning:** survival numbers will live in one `src/sim/config.js` (not yet written); render constants are at the top of `scene.js` (`SUN_DISTANCE`).
+- **Config and tuning:** survival numbers live in `src/sim/config.js`; each mission can override them in `src/game/missions.js`; render constants are at the top of `scene.js` (`SUN_DISTANCE`).
+- **Mask vs mesh:** for real sites the stored `horizonMask` comes from the pipeline's wide DEM (out to 250 km), not from the 10 km mesh. The on-map shadows and the `?debug` render check only know the mesh, so they can differ from the sim near sunrise and sunset. The sim is authoritative.
 - **Data / content:** see "Site data" below.
 - **Randomness:** none in the game; the demo generator uses a seeded RNG (`mulberry32(2026)`) so the file is identical on every machine.
 - **Rendering / UI layering:** one full-screen `<canvas>`, HUD as DOM elements on top. HUD text is never run through the ASCII pass.
@@ -60,6 +81,16 @@ The contract between the Python pipeline and the game. `loadSite.js` validates t
   "lat": -89.5, "lon": 0,                 // degrees, lunar
   "illustrative": true,                   // false only for real LOLA + Horizons data
   "source": "free text: where the data came from",
+  // Fields added with schemaVersion 2 (real sites). All optional for loadSite.js, which passes them through.
+  "schemaVersion": 2,
+  "blurb": "one line shown in the planner",
+  "maskSource": "lola-wide",              // where horizonMask came from; "lola-wide" = fine + wide LOLA DEM
+  "terrain": { "real": true, "dataSet": "LRO-L-LOLA-4-GDR-V1.0", "productVersion": "V2.0",
+               "meshProduct": "LDEM_85S_40M", "horizonProducts": ["LDEM_85S_40M", "LDEM_80S_80M"],
+               "frame": "MEAN EARTH/POLAR AXIS OF DE421", "horizonRangeKm": 250, "eyeHeightM": 2 },
+  "sky": { "real": true, "kernels": ["de440s.bsp", "..."], "frame": "MOON_ME", "aberration": "LT+S",
+           "validation": { "against": "JPL Horizons API", "toleranceDeg": 0.02, "checkedUtc": "...",
+                           "sunMaxSeparationDeg": 0.00007, "earthMaxSeparationDeg": 0.00007 } },
   "heightmap": {
     "size": 257,                          // grid points per side (square)
     "spacingM": 40,                       // metres between grid points
@@ -82,14 +113,17 @@ Sizes: a 257² heightmap plus 1440 hours is about 210 KB. Keep each site under 5
 ## 5. File layout
 ```
 docs/            GDD, ARCHITECTURE, features/<slug>/
-public/sites/    site JSON files (demo.json is generated, illustrative)
+pipeline/        offline Python: scripts/01-07, common.py, config/sites.yaml, tests/, validation/ reports
+public/sites/    site JSON files: ridge, spur, knoll, hollow (real); demo.json (illustrative, tests only)
 scripts/         make-demo-site.mjs (node, writes demo.json)
 src/
-  sim/           horizon.js, visibility.js   (pure, no three.js)
+  sim/           horizon.js, visibility.js, config.js, survival.js, planner.js, solver.js   (pure, no three.js)
+  game/          missions.js, schedule.js, progress.js, settings.js                           (pure, no React)
+  ui/            Screens, Planner, Schedule, MissionHud, Compass (JSX); gameHelpers.js; audio.js
   data/          loadSite.js
-  render/        terrain.js, sun.js, camera.js, scene.js
+  render/        terrain.js, sun.js, camera.js, scene.js, ascii.js
   App.jsx, main.jsx, styles.css, theme.js
-tests/           vitest specs (visibility.test.js)
+tests/           vitest specs: visibility.test.js, sim/, ui/
 ```
 
 ## 6. Performance budget
@@ -98,9 +132,9 @@ tests/           vitest specs (visibility.test.js)
 - Site JSON under 500 KB each.
 
 ## 7. Testing and tooling
-- `npm test` runs `tests/**/*.test.js` in Node. `tests/visibility.test.js` checks axis conventions, mask interpolation, that `demo.json`'s stored mask matches `computeMask`, and that the render raycast agrees with the sim mask on ≥ 95% of hours.
+- `npm test` runs `tests/**/*.test.js` in Node (32 tests). `tests/sim/` covers the survival sim and planner; `tests/ui/` covers the campaign (every mission site is real, validated and winnable), the schedule (the forecast equals hour-by-hour playback), saved progress and settings. `pytest pipeline/tests` (12 tests) covers the pipeline geometry. `tests/visibility.test.js` checks axis conventions, mask interpolation, that `demo.json`'s stored mask matches `computeMask`, and that the render raycast agrees with the sim mask on ≥ 95% of hours.
 - `npm run demo-site` regenerates `public/sites/demo.json`.
-- Debug: `?h=<hour>` opens the app at a given mission hour; the HUD's "render check" line compares the raycast with the sim every hour.
+- URL options: `?debug` shows fps and the "render check" line (raycast vs sim); `?ascii=0` plain shading; `?ascii=force` never auto-switch ASCII off; `?replan=<s>` shortens the launch-slip countdown.
 
 ## 8. Build and release
 - `npm run dev` (port 5173), `npm run build` → `dist/`, `npm run preview`.
@@ -108,4 +142,6 @@ tests/           vitest specs (visibility.test.js)
 
 ## 9. Open questions and tech risks
 - The ASCII pass (two render targets plus a full-screen shader) is the main frame-rate risk; measure before and after on a real GPU.
-- Real sites: whether a 10 km crop is enough for the far ridges that set the horizon at the south pole. The pipeline may need a wider, coarser crop for the mask than for the mesh.
+- Real sites: resolved. A 10 km crop is not enough; the horizon is set by terrain up to 190 km away at these sites, so the pipeline computes the mask from a wide DEM (250 km) and ships it in the site file.
+- The Sun is treated as a point; a partial-disc model would make sunrise and sunset gradual.
+- Stars compare against the best automatic plan; the solver does not search hand-made schedules.

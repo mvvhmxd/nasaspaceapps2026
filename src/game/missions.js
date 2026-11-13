@@ -12,7 +12,7 @@ export const MISSIONS = [
     brief: [
       'Land a small solar lander near the Moon’s south pole and keep it alive for 7 Earth days.',
       'The Sun charges the battery only when it clears the local ridge line. In shadow the battery drains.',
-      'One site, one decision: pick the landing day with the most light.',
+      'One site, one decision: the landing day. Surviving earns the first star. More stars need science sent home, and that needs Earth in view as well as light.',
     ],
   },
   {
