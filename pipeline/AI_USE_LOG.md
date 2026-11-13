@@ -7,3 +7,4 @@
 | 2026-11-13 | Claude (Anthropic) | Wrote 02_fetch_dem, 03_crop_local_frame, 05_horizon_mask, 07_export_site, candidates.py and physics tests; ran the full pipeline for four sites; game UI (campaign, schedule) | Pending review by Anas |
 | 2026-11-13 | Claude (Anthropic) | Rover rules and tests, surface view with halftone dots, README and docs | Pending review by Anas |
 | 2026-11-13 | Claude (Anthropic) | Combined the game branches with Dev 1's main: resolved conflicts, moved missions to Connecting Ridge and Dev 1's window, rebuilt spur/hollow, added massif | Pending review by Anas |
+| 2026-11-13 | Claude (Anthropic) | Merged Ayman's ASCII quality presets with the game: one saved setting, G key, presets shared with Settings | Pending review by Anas |

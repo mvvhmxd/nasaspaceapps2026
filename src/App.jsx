@@ -11,10 +11,12 @@ import { Title, MissionSelect, Brief, Help, Credits, Settings, Debrief, SkyBadge
 import Planner from './ui/Planner.jsx';
 import Schedule from './ui/Schedule.jsx';
 import { emptySchedule, planFrom } from './game/schedule.js';
-import { ASCII_QUALITY, loadSettings, saveSettings } from './game/settings.js';
+import { loadSettings, saveSettings } from './game/settings.js';
 import { unlockAudio, setVolume, play } from './ui/audio.js';
 import Compass from './ui/Compass.jsx';
 import MissionHud, { MissionStatus, RoverStatus } from './ui/MissionHud.jsx';
+import { initialQuality } from './render/quality.js';
+import AsciiQuality from './ui/AsciiQuality.jsx';
 
 const SPEEDS = [1, 4, 16]; // game hours per 0.5 s (docs/features/survival-sim)
 const TICK_MS = 500;
@@ -60,7 +62,11 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [fps, setFps] = useState(0);
   const [renderBlocked, setRenderBlocked] = useState(null);
-  const [ascii, setAsciiState] = useState({ on: true, reason: 'user' });
+  const [ascii, setAsciiState] = useState(() => {
+    // ?ascii=0 and ?quality= win, then the player's saved setting.
+    const quality = initialQuality(location.search, { getItem: () => loadSettings().ascii });
+    return { on: quality !== 'off', reason: 'user', quality };
+  });
 
   const mission = missionById(missionId);
   const cfg = mission.config;
@@ -80,11 +86,15 @@ export default function App() {
     if (!site) return;
     const s = createSurfaceScene(canvasRef.current, site, {
       onFps: setFps,
-      onAsciiChange: setAsciiState,
-      cellCss: ASCII_QUALITY.find((q) => q.id === settings.ascii)?.cell ?? 10,
-      autoOff: params.get('ascii') !== 'force', // ?ascii=force keeps the ASCII look on slow machines (demos, screenshots)
+      onAsciiChange: (a) => {
+        setAsciiState(a);
+        // A player's choice (menu, Settings or G) is saved in settings; low-fps steps are not.
+        if (a.reason === 'user') setSettings((cur) => (cur.ascii === a.quality ? cur : { ...cur, ascii: a.quality }));
+      },
+      quality: ascii.quality, // ?quality=high|balanced|performance|off, ?ascii=0, or the saved setting
+      cellCss: Number(params.get('cell')) || undefined, // ?cell=8 overrides the preset's cell size
+      autoOff: params.get('ascii') !== 'force', // ?ascii=force keeps the quality fixed on slow machines (demos, screenshots)
     });
-    if (params.get('ascii') === '0' || settings.ascii === 'off') s.setAscii(false);
     sceneRef.current = s;
     return () => { s.dispose(); sceneRef.current = null; };
   }, [site]);
@@ -93,10 +103,8 @@ export default function App() {
   useEffect(() => {
     setVolume(settings.volume, settings.muted);
     saveSettings(settings);
-    const q = ASCII_QUALITY.find((x) => x.id === settings.ascii);
-    if (!sceneRef.current || !q) return;
-    if (q.cell) sceneRef.current.setCell(q.cell);
-    sceneRef.current.setAscii(q.cell !== null && params.get('ascii') !== '0');
+    const sc = sceneRef.current;
+    if (sc && params.get('ascii') !== '0' && sc.quality !== settings.ascii) sc.setQuality(settings.ascii);
   }, [settings]);
 
   // Browsers only allow sound after a click or key press.
@@ -347,12 +355,7 @@ export default function App() {
           )}
           <div className="hud top-right">
             {DEBUG && <div>{fps} fps</div>}
-            <div>
-              <button className={ascii.on ? 'on' : ''} aria-pressed={ascii.on} onClick={() => sceneRef.current?.setAscii(!ascii.on)}>
-                ASCII {ascii.on ? 'on' : 'off'} (G)
-              </button>
-              {ascii.reason === 'auto' && !ascii.on && <div className="dark">switched off: low fps</div>}
-            </div>
+            <AsciiQuality ascii={ascii} onChange={(q) => sceneRef.current?.setQuality(q)} />
             <div hidden={!DEBUG}>
               render check:{' '}
               {agree === null ? '…' : agree ? <span className="lit">agrees &#10003;</span> : <span className="dark">differs &#10007;</span>}

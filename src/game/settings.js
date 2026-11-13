@@ -1,13 +1,17 @@
 // Player settings, kept in localStorage. Pure except load/save.
+import { QUALITY_ORDER, QUALITY_PRESETS, DEFAULT_QUALITY } from '../render/quality.js';
+
 const KEY = 'crater-expectations-settings-v1';
 
-export const ASCII_QUALITY = [
-  { id: 'high', label: 'High', cell: 8 },
-  { id: 'balanced', label: 'Balanced', cell: 10 },
-  { id: 'performance', label: 'Performance', cell: 12 },
-  { id: 'off', label: 'Off (plain shading)', cell: null },
-];
-export const DEFAULTS = { volume: 0.6, muted: false, ascii: 'balanced' };
+
+// ASCII detail choices come from the renderer's presets (src/render/quality.js), so the
+// Settings screen, the in-game menu and the low-fps step-down all use the same list.
+export const ASCII_QUALITY = QUALITY_ORDER.map((id) => ({
+  id,
+  label: id === 'off' ? 'Off (plain shading)' : QUALITY_PRESETS[id].label,
+  cell: QUALITY_PRESETS[id].ascii ? QUALITY_PRESETS[id].cellCss : null,
+}));
+export const DEFAULTS = { volume: 0.6, muted: false, ascii: DEFAULT_QUALITY };
 
 /** Returns a complete, valid settings object whatever was stored. */
 export function sanitizeSettings(raw) {
