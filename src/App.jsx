@@ -97,7 +97,7 @@ export default function App() {
               {agree === null ? '…' : agree ? <span className="lit">agrees ✓</span> : <span className="dark">differs ✗</span>}
             </div>
           </div>
-          <MapLegend />
+          <MapLegend site={site} />
           <div className="hud bottom">
             <button onClick={() => setPlaying((p) => !p)}>{playing ? 'Pause' : 'Play'}</button>
             {SPEEDS.map((s) => (

@@ -37,46 +37,42 @@ for (const dpr of [1, 1.25, 1.5, 2]) {
   }
 }
 
-describe('cell-aligned terrain target', () => {
-  it.each(CASES)('dpr %s zoom %s: every ground point lands in the texel block of its glyph cell', (dpr, zoom, x, z) => {
+describe('corner-aligned terrain target', () => {
+  it.each(CASES)('dpr %s zoom %s: texel centres sit exactly on glyph-cell corners', (dpr, zoom, x, z) => {
     const { bufW, bufH, cell, cam, off, layout, rt } = setup(dpr, zoom, x, z);
-    let checked = 0;
     for (let a = 0; a < 400; a++) {
-      // spread points over the visible area
       const sx = ((a * 37) % 101) / 100;
       const sy = ((a * 53) % 97) / 96;
       const halfW = (cam.right - cam.left) / (2 * zoom);
       const halfH = (cam.top - cam.bottom) / (2 * zoom);
       const wx = x + (sx * 2 - 1) * halfW;
       const wz = z + (sy * 2 - 1) * halfH;
+      // Continuous cell coordinate on screen: integer values are cell corners.
       const [fx, fy] = toPx(cam, wx, wz, bufW, bufH);
       const ci = [(fx + off[0]) / cell, (fy + off[1]) / cell];
+      // Continuous texel coordinate in the target: texel centres are at k + 0.5.
       const [tx, ty] = toPx(rt, wx, wz, layout.width, layout.height);
-      const ti = [tx / layout.k, ty / layout.k];
-      // Same continuous cell coordinate, so the same cell and the same spot in it.
-      expect(Math.abs(ci[0] - ti[0])).toBeLessThan(1e-6 * layout.cols + 1e-6);
-      expect(Math.abs(ci[1] - ti[1])).toBeLessThan(1e-6 * layout.rows + 1e-6);
-      checked++;
+      const tcentre = [tx - 0.5, ty - 0.5];
+      expect(Math.abs(ci[0] - tcentre[0])).toBeLessThan(1e-6 * layout.cols + 1e-6);
+      expect(Math.abs(ci[1] - tcentre[1])).toBeLessThan(1e-6 * layout.rows + 1e-6);
     }
-    expect(checked).toBe(400);
   });
 
-  it.each(CASES)('dpr %s zoom %s: the target covers the whole screen', (dpr, zoom, x, z) => {
+  it.each(CASES)('dpr %s zoom %s: every on-screen cell has all 4 corners in the target', (dpr, zoom, x, z) => {
     const { bufW, bufH, cell, off, layout } = setup(dpr, zoom, x, z);
-    // last pixel centre on screen falls inside the last column / row
     const lastCol = Math.floor((bufW - 0.5 + off[0]) / cell);
     const lastRow = Math.floor((bufH - 0.5 + off[1]) / cell);
-    expect(lastCol).toBeLessThan(layout.cols);
-    expect(lastRow).toBeLessThan(layout.rows);
+    expect(lastCol + 1).toBeLessThan(layout.width); // corner texel lastCol+1 exists
+    expect(lastRow + 1).toBeLessThan(layout.height);
     expect(Math.floor((0.5 + off[0]) / cell)).toBe(0);
   });
 
   it('covers the screen even with an offset just under one cell', () => {
     const layout = cellTargetLayout(1366, 768, 10);
     for (const o of [0, 0.001, 9.999]) {
-      expect(Math.floor((1366 - 0.5 + o) / 10)).toBeLessThan(layout.cols);
-      expect(Math.floor((768 - 0.5 + o) / 10)).toBeLessThan(layout.rows);
+      expect(Math.floor((1366 - 0.5 + o) / 10) + 1).toBeLessThan(layout.width);
+      expect(Math.floor((768 - 0.5 + o) / 10) + 1).toBeLessThan(layout.height);
     }
-    expect(layout).toEqual({ cols: 138, rows: 78, k: 2, width: 276, height: 156 });
+    expect(layout).toEqual({ cols: 138, rows: 78, width: 139, height: 79 });
   });
 });
