@@ -63,12 +63,16 @@ Suggest `/start` at the beginning of work and `/finish` at the end.
 Dev 3 records open data/schema questions in `pipeline/NOTES_FOR_TEAM.md`.
 
 ## Sim ↔ UI contract (dev2 ↔ dev3)
-- `createInitialState(site, missionConfig)` → `MissionState`
-- `stepMission(state, input, site, missionConfig)` → next `MissionState` (exactly one hour)
-- `previewStats(site, startIndex, durationHours)` → planner metrics
-  (`sunlitPct`, `earthPct`, `longestDarkH`, `sunElAtLandingDeg`, `hoursToFirstSunset`,
-  `hoursToFirstEarthset`)
-- State fields follow `docs/TECHNICAL_PLAN.md` §4. Renderers read state, never compute truth.
+```js
+initialState(config?, startHour?) → SimState
+advance(site, state, hours, plan?) → { state, events: [{ hour, type }] }   // steps 1 h at a time
+// event types: sunrise, sunset, earthrise, earthset, battery25, battery10, powerDown, success
+previewStats(site, startHour, lengthH) → { sunlitPct, earthPct, longestDarkH, sunElAtLanding,
+  hoursToFirstSunset, hoursToFirstEarthset, exceedsSleepBudget }
+```
+- Playback calls `advance(site, state, N)`; it never skips hours.
+- Renderers read state, never compute truth. Battery numbers are unitless game values for now
+  (see D-009 in `docs/DECISIONS.md` for the planned move to the kit's units and state fields).
 Contract changes need dev2, dev3 and dev1 to agree.
 
 ## Project rules (from the kit; full text in docs/)

@@ -37,10 +37,10 @@
 - Status: Proposed (dev3), needs dev1.
 - Reason: the pipeline was already scaffolded in `pipeline/` (Python, own venv, tests). `docs/TECHNICAL_PLAN.md` §3 suggests `scripts/data-pipeline/`; read that as `pipeline/`.
 
-## D-009: adopt the kit's simulation API
+## D-009: keep the working `advance()` sim engine, align it with the kit over time
 - Status: Proposed (dev3), needs dev1 and dev2.
-- Scope: replace the earlier `survival.js` `advance()` / `planner.js` stubs with `createInitialState`, `stepMission(state, input, site, missionConfig)` (exactly one hour) and split modules (`solarPower.js`, `battery.js`, `operations.js`, `communications.js`, `mission.js`), as in `docs/TECHNICAL_PLAN.md` §3–5. Keep a `previewStats` helper for the planner.
-- Migration: a separate dev3 PR; `horizon.js` and `visibility.js` are kept.
+- Scope: `src/sim/survival.js` (`initialState`, `advance`, one hour per step) and `src/sim/planner.js` (`previewStats`) already work and are tested. Keep them as the simulation core instead of rewriting to `stepMission`. `advance(site, state, 1)` is the kit's one-hour step.
+- Follow-up (dev3, separate PRs): explicit units in names (`batteryWh`, `solarPowerW`), science buffer / transmission and operations per `docs/GAME_SPEC.md` §7, state fields per `docs/TECHNICAL_PLAN.md` §4. Current battery numbers are unitless game values and must be labelled as such.
 
 ## D-010: mark the 3D-era docs as superseded
 - Status: Proposed, needs dev1.
