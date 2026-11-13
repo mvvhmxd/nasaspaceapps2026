@@ -1,0 +1,56 @@
+:root {
+  --navy: #0b1026;
+  --amber: #f5a524;
+  --teal: #3fb6a8;
+  --grey: #c9ced6;
+  --red: #e5484d;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--navy);
+  color: var(--grey);
+  font: 14px/1.45 ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+.app { position: relative; height: 100%; overflow: hidden; }
+.view { display: block; width: 100%; height: 100%; touch-action: none; }
+.msg { padding: 16px; }
+
+.hud {
+  position: absolute;
+  padding: 10px 12px;
+  background: rgba(11, 16, 38, 0.82);
+  border: 1px solid rgba(201, 206, 214, 0.18);
+  border-radius: 6px;
+}
+.top-left { top: 12px; left: 12px; max-width: calc(100% - 24px); }
+.top-right { top: 12px; right: 12px; text-align: right; }
+.bottom {
+  left: 12px; right: 12px; bottom: 12px;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.bottom input[type='range'] { flex: 1; min-width: 160px; accent-color: var(--amber); }
+
+.title { color: #fff; font-weight: 600; }
+.badge {
+  display: inline-block; margin: 2px 0 4px; padding: 0 6px;
+  border: 1px solid var(--amber); color: var(--amber); border-radius: 3px; font-size: 12px;
+}
+.lit { color: var(--amber); }
+.comms { color: var(--teal); }
+.dark { color: var(--red); }
+.hour { min-width: 56px; text-align: right; }
+
+button {
+  font: inherit; color: var(--grey); background: transparent;
+  border: 1px solid rgba(201, 206, 214, 0.35); border-radius: 4px; padding: 4px 10px; cursor: pointer;
+}
+button:hover { border-color: var(--grey); }
+button.on { border-color: var(--amber); color: var(--amber); }
+
+@media (max-width: 600px) {
+  .top-right { top: auto; bottom: 64px; }
+}
