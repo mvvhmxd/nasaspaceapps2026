@@ -68,6 +68,7 @@ const AsciiShader = {
     glyphCount: { value: 32 },
     resolution: { value: new THREE.Vector2(1, 1) }, // drawing-buffer pixels
     cell: { value: 8 }, // cell size in drawing-buffer pixels
+    gridOffset: { value: new THREE.Vector2(0, 0) }, // keeps the grid on the ground while panning
     fill: { value: 0.45 }, // scene colour showing behind the glyph
     saturation: { value: 1.4 },
     gain: { value: 1.6 }, // glyph tint brightness
@@ -90,6 +91,7 @@ const AsciiShader = {
     uniform float glyphCount;
     uniform vec2 resolution;
     uniform float cell;
+    uniform vec2 gridOffset;
     uniform float fill;
     uniform float saturation;
     uniform float gain;
@@ -103,8 +105,10 @@ const AsciiShader = {
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
     void main() {
-      vec2 cellIndex = floor(gl_FragCoord.xy / cell);
-      vec2 cellUv = (cellIndex + 0.5) * cell / resolution;
+      // Grid anchored to the terrain, not the screen: no glyph crawl when panning.
+      vec2 p = gl_FragCoord.xy + gridOffset;
+      vec2 cellIndex = floor(p / cell);
+      vec2 cellUv = ((cellIndex + 0.5) * cell - gridOffset) / resolution;
       vec3 scene = texture(tDiffuse, cellUv).rgb;
 
       // Linear -> perceptual, then a contrast curve so lit ground is dense and
@@ -113,7 +117,7 @@ const AsciiShader = {
       float lum = smoothstep(contrastLo, contrastHi, y);
 
       float idx = floor(lum * (glyphCount - 1.0) + 0.5);
-      vec2 local = fract(gl_FragCoord.xy / cell);
+      vec2 local = fract(p / cell);
       vec2 glyphUv = vec2((idx + local.x) / glyphCount, local.y);
       float ink = texture(tGlyph, glyphUv).r;
 
@@ -142,6 +146,13 @@ export function createAsciiPass({ cellCss = 8, pixelRatio = 1, glyphs = 32 } = {
     ramp: '',
     setSize(w, h) {
       pass.uniforms.resolution.value.set(w, h);
+    },
+    /** [x, y] sub-cell shift in drawing-buffer pixels (see camera.gridOffsetPx). */
+    setGridOffset(x, y) {
+      pass.uniforms.gridOffset.value.set(x, y);
+    },
+    get cellPx() {
+      return pass.uniforms.cell.value;
     },
     setCell(css, dpr, count = glyphs) {
       glyphs = count;

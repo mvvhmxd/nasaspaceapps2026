@@ -8,7 +8,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTerrain, landerEye, blockedToward } from './terrain.js';
 import { directionFromAzEl } from './sun.js';
-import { createTopDownCamera, fitTopDown } from './camera.js';
+import { createTopDownCamera, fitTopDown, gridOffsetPx } from './camera.js';
 import { createAsciiPass } from './ascii.js';
 import { QUALITY_PRESETS, DEFAULT_QUALITY, isQuality, lowerQuality } from './quality.js';
 import { PALETTE } from '../theme.js';
@@ -156,6 +156,8 @@ export function createSurfaceScene(
 
   function draw() {
     if (preset().ascii) {
+      const [ox, oy] = gridOffsetPx(camera, canvas.clientHeight * pixelRatio, ascii.cellPx);
+      ascii.setGridOffset(ox, oy);
       camera.layers.set(0); // terrain only through the glyph pass
       composer.render();
       camera.layers.set(SHARP_LAYER); // lander drawn crisp on top
