@@ -59,7 +59,8 @@ export default function App() {
   }, [site]);
 
   const stats = useMemo(() => (site ? dayStats(site, SIM_CONFIG.missionHours) : []), [site]);
-  const best = useMemo(() => (site ? bestStart(site) : null), [site]);
+  // Stride 24 h: the solver only considers landing hours the planner can actually select.
+  const best = useMemo(() => (site ? bestStart(site, SIM_CONFIG, 24) : null), [site]);
 
   // The hour shown on the map: the sim's hour while flying, else the planned landing hour.
   const inMission = (screen === 'surface' || screen === 'debrief') && sim;

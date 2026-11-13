@@ -73,7 +73,7 @@ export default function Planner({ site, stats, day, minDay, pinned, slip, countd
         ))}
       </div>
       <div className="row">
-        <button onClick={onBack}>Back</button>
+        {countdown === null && <button onClick={onBack}>Back</button>}
         <button className="primary" onClick={onLand}>Land on day {day + 1}</button>
       </div>
     </div>
