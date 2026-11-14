@@ -83,6 +83,10 @@ window.CONFIG = {
   danger_depart: { value: 8, min: 1, max: 24, step: 0.5 },        // departure this close (and you away from the lander) starts it too
   cut_landing: { value: 10, min: 3, max: 20, step: 0.5 },         // landing cutscene, seconds
   cut_launch: { value: 8, min: 3, max: 20, step: 0.5 },           // take-off cutscene, seconds
+  cut_cam_dist: { value: 0.3, min: 0.05, max: 0.6, step: 0.01 }, // cutscene camera distance from the lander, km
+  cut_alt: { value: 0.45, min: 0.1, max: 2, step: 0.05 },          // lander altitude when the descent shot opens, km
+  cut_scale: { value: 7, min: 1, max: 8, step: 0.25 },          // how much bigger the lander is drawn in cutscenes, for readability
+  walkthrough: { value: 1, min: 0, max: 1, step: 1 },              // 1: show the numbered tour in Mission 1 (H replays it)
 };
 
 // The site: a hand-shaped model of the Shackleton rim / Connecting Ridge area (illustrative).

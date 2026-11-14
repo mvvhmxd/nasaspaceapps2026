@@ -34,7 +34,7 @@ const TITLE = 'Crater Expectations';
 const CONTROLS = [
   'ORBIT    arrows/WASD move scout   F plant flag   [ ] landing hour   V ground view (Q/E look)   ENTER land',
   'ROVER    W/S throttle   A/D steer   E work station   Z wait 1h   hold TAB (or V) instruments   ENTER at lander: launch',
-  'ANY      M mute   ESC pause   ENTER continue dialogs / skip cutscenes',
+  'ANY      H walkthrough   M mute   ESC pause   ENTER continue dialogs / skip cutscenes',
 ];
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 };
 const CHEAP = params.get('render') === 'cheap';
@@ -193,7 +193,8 @@ const scan = document.createElement('canvas'); scan.width = W; scan.height = H;
   g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
   s.fillStyle = g; s.fillRect(0, 0, W, H);
 }
-const fx = { sun: null, earth: null, red: 0, vx: W / 2, vy: H / 2, vr: H }; // glare positions in px; the red pulse
+const mask = document.createElement('canvas'); mask.width = W; mask.height = H;
+const fx = { holes: null, sun: null, earth: null, red: 0, vx: W / 2, vy: H / 2, vr: H }; // glare positions in px; the red pulse
 function present() {
   flush();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
@@ -225,6 +226,13 @@ function present() {
     const R = fx.red, g = ctx.createRadialGradient(fx.vx, fx.vy, fx.vr * 0.55, fx.vx, fx.vy, fx.vr * 1.15);
     g.addColorStop(0, 'rgba(255,40,20,0)'); g.addColorStop(1, `rgba(255,40,20,${(0.38 * R).toFixed(3)})`);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (fx.holes) { // the walkthrough's spotlight: everything else dims
+    const m = mask.getContext('2d');
+    m.globalCompositeOperation = 'source-over'; m.clearRect(0, 0, W, H); m.fillStyle = 'rgba(0,0,0,0.66)'; m.fillRect(0, 0, W, H);
+    m.globalCompositeOperation = 'destination-out'; m.fillStyle = '#000';
+    for (const [c, r, w, h] of fx.holes) m.fillRect(c * CW, r * CHH, w * CW, h * CHH);
+    ctx.drawImage(mask, 0, 0); fx.holes = null;
   }
   ctx.drawImage(scan, 0, 0);
 }
@@ -1065,7 +1073,7 @@ function startCut(kind) {
 }
 function finishCut() {
   const c = state.cut; state.cut = null;
-  if (c.kind === 'landing') { touchdown(); scene = 'play'; burst(0.5, 0.95, 90, 1.4, '#b8b0a0', ['.', '·', '∙', '•']); sfx.thump(0.6); }
+  if (c.kind === 'landing') { touchdown(); scene = 'play'; maybeTour('surface'); burst(0.5, 0.95, 90, 1.4, '#b8b0a0', ['.', '·', '∙', '•']); sfx.thump(0.6); }
   else scene = 'results';
 }
 
@@ -1232,61 +1240,112 @@ function renderView(cam, w, rows) {
   }
   return VB;
 }
-// Sprites in dots: each character is a palette key (lit / shade pairs), '.' or ' ' is see-through.
+// Sprites in dots: each letter is a palette key, a space is see-through. w and h are the real size in metres.
+function mkSprite(w, h, art) { const n = Math.max(...art.map(s => s.length)); return { w, h, art: art.map(s => s.padEnd(n)) }; }
+const LANDER_TOP = [
+  '          a          ',
+  '          a          ',
+  '       kAAAAAk       ',
+  '     kAAWAAAWAAk     ',
+  '    kAAAAAAAAAAAk    ',
+  '    kAAAAAoAAAAAk    ',
+  '     kkkkkkkkkkk     ',
+], LANDER_BASE = [
+  '   GGGGGGGGGGGGGGG   ',
+  '   GgGGgGGgGGgGGgG   ',
+  '   GGGGGGGGGGGGGGG   ',
+  '   gGGgGGgGGgGGgGg   ',
+  '    l    nnn    l    ',
+  '   l     nnn     l   ',
+  '  l       n       l  ',
+  ' l                 l ',
+  'ff                 ff',
+];
 const SPRITES = {
-  lander: { w: 9, h: 8, art: ['    aAa    ', '   aAAAa   ', '  aAAAAAa  ', '   aAAAa   ', ' gGGGGGGGg ', ' gGGGGGGGg ', ' gGGGGGGGg ', '  l  n  l  ', ' l   n   l ', 'l         l'] },
-  array: { w: 9, h: 5, art: ['PpPpPpPpPp', 'pPpPpPpPpP', 'PpPpPpPpPp', 'pPpPpPpPpP', '    mm    ', '    mm    ', '   mmmm   '] },
-  dish: { w: 5, h: 6, art: [' dDDDDd ', 'dDDDDDDd', ' dDDDDd ', '   mm   ', '   mm   ', '   mm   ', '  mmmm  '] },
-  beacon: { w: 3, h: 5, art: [' b ', ' m ', ' m ', ' m ', ' m ', 'rRr', 'RRR'] },
-  rig: { w: 4, h: 6, art: ['  b  ', '  m  ', '  m  ', ' mMm ', ' m m ', 'm   m'] },
-  flag: { w: 2, h: 3, art: ['mFF', 'mFF', 'm  ', 'm  ', 'm  '] },
-  rover: { w: 3.5, h: 1.8, art: ['   t    ', '   t    ', ' cCCCCc ', 'wWw  wWw'] },
+  lander: mkSprite(9.5, 8, [...LANDER_TOP, ...LANDER_BASE]),
+  ascent: mkSprite(9.5, 3.5, LANDER_TOP),
+  descent: mkSprite(9.5, 4.5, LANDER_BASE),
+  array: mkSprite(9, 5, [
+    'PpPpPpPp PpPpPpPp', 'pPpPpPpP pPpPpPpP', 'PpPpPpPp PpPpPpPp', 'pPpPpPpP pPpPpPpP', 'PpPpPpPp PpPpPpPp',
+    'kkkkkkkkmkkkkkkkk', '        m        ', '        m        ', '       lml       ', '      l m l      ', '     ff f ff     ']),
+  dish: mkSprite(5, 6, [
+    '  dDDDDDDDd  ', ' dDDDDDDDDDd ', 'dDDDDDhDDDDDd', ' dDDDDDDDDDd ', '  ddDDDDDdd  ',
+    '     kmk     ', '      m      ', '      m      ', '     lml     ', '    l m l    ', '   ff f ff   ']),
+  beacon: mkSprite(2.6, 3, [
+    '      B      ', '      m      ', '   kkkkkkk   ', '   kSSSSsk   ', '   kSLLSsk   ', '   kSSSSsk   ', '   kkkkkkk   ',
+    '      m      ', '     lml     ', '    l m l    ', '   l  m  l   ', '  l   m   l  ', ' l    m    l ', 'ff         ff']),
+  rig: mkSprite(3, 4.5, [
+    '     kBk     ', '     kmk     ', '     kxk     ', '     kmk     ', '    lkxkl    ', '   l kmk l   ', '  l  kxk  l  ',
+    ' RRR kmk     ', ' RrR kxk     ', ' RRR kmk     ', 'ffffffdffffff']),
+  flag: mkSprite(1.6, 2.4, ['mFFFFFFF', 'mWWWWWWW', 'mFFFFFFF', 'mWWWWWWW', 'm       ', 'm       ', 'm       ', 'm       ', 'm       ', 'f       ']),
+  rover: mkSprite(3.2, 1.9, [
+    '  t             ', '  t   kkkkk     ', '  t  kSSSSSk    ', ' RRRRRRRRRRRRRR ', ' rRRRRRRRRRRRRr ', 'wWw   wWw   wWw ', ' w     w     w  ']),
 };
+/** The metal every sprite shares: frame k, mast m, legs l, feet f; lit or in shade. */
+function metalPal(lit) {
+  return { k: ['•', lit ? '#9aa4b4' : '#4e5560'], m: ['•', lit ? '#c8d0dc' : '#6a727e'], l: ['∙', lit ? '#8a929e' : '#454b55'], f: ['•', '#4a505a'], x: ['∙', lit ? '#e0e6ee' : '#7a828e'] };
+}
 /**
- * Draw a sprite standing at (x, y) km, sized by distance (with the view's vertical exaggeration, both ways,
- * so it keeps its shape), hidden by nearer ground. pal maps a key to [dot, colour]. Returns its screen spot.
+ * Draw a sprite standing at (x, y) km, alt km above the ground, sized by its slant distance (with the view's
+ * vertical exaggeration both ways, so it keeps its shape, and capped so a near one never fills the view),
+ * hidden by nearer ground. pal maps a key to [dot, colour]. Returns its screen spot.
  */
-function sprite(W, x, y, spr, pal, minRows = 3) {
+function sprite(W, x, y, spr, pal, minRows = 3, alt = 0, maxRows = W.rows * 0.34) {
   const { V, cam, w, rows, fc0, fr0 } = W;
-  const dx = x - cam.x, dy = y - cam.y, d = Math.hypot(dx, dy);
-  if (d < 0.012 || d > 40) return null;
+  const dx = x - cam.x, dy = y - cam.y, d = Math.hypot(dx, dy), ds = Math.hypot(d, alt);
+  if (ds < 0.012 || d > 40) return null;
   const rel = angDiff(Math.atan2(dx, -dy) * R2D, cam.hd), i = w / 2 + rel / cam.dpc;
-  if (i < -30 || i > w + 30) return null;
-  const el = Math.atan2(hgt(x, y) - d * d / (2 * MOON_R) - cam.eye, d) * R2D;
+  if (i < -60 || i > w + 60) return null;
+  const el = Math.atan2(hgt(x, y) + alt - d * d / (2 * MOON_R) - cam.eye, Math.max(d, 0.001)) * R2D;
   const base = W.rowAt(i) - el / cam.dpr;
-  const hR = Math.max(minRows, Math.atan2(spr.h / 1000, d) * R2D / cam.dpr), wC = hR * FH / FW * spr.w / spr.h;
+  const hR = clamp(Math.atan2(spr.h / 1000, ds) * R2D / cam.dpr * (cam.sprScale || 1), minRows, maxRows), wC = hR * FH / FW * spr.w / spr.h;
+  const seen = blitSprite(fc0, fr0, i - wC / 2, base - hR, hR, wC, spr, pal,
+    (vi, vr) => vi >= 0 && vi < w && vr >= 0 && vr < rows && V.dep[vr * w + vi] >= d * 0.97); // nearer ground hides it
+  return { i, top: base - hR, base, d, seen, onScreen: i >= 0 && i < w, wC, hR };
+}
+/** Paint a sprite into a fine-cell box (left, top, hR rows by wC cols); keep(vi, vr) says which dots show. */
+function blitSprite(fc0, fr0, left, top, hR, wC, spr, pal, keep) {
   const art = spr.art, AH = art.length, AW = art[0].length;
   let seen = false;
   for (let rr = 0; rr < Math.ceil(hR); rr++) for (let cc = 0; cc < Math.ceil(wC); cc++) {
     const key = art[Math.min(AH - 1, Math.floor(rr / hR * AH))][Math.min(AW - 1, Math.floor(cc / wC * AW))];
-    if (key === ' ' || key === '.') continue;
-    const vi = Math.floor(i - wC / 2 + cc), vr = Math.floor(base - hR + rr);
-    if (vi < 0 || vi >= w || vr < 0 || vr >= rows) continue;
-    if (V.dep[vr * w + vi] < d * 0.97) continue; // nearer ground in front
+    if (key === ' ') continue;
+    const vi = Math.floor(left + cc), vr = Math.floor(top + rr);
+    if (keep && !keep(vi, vr)) continue;
     const p = pal[key]; if (!p) continue;
-    fput(fc0 + vi, fr0 + vr, p[0], p[1]); seen = true;
+    // solid areas get a little grain, so big near sprites read as built things, not blocks
+    const dot = p[0] === '●' && hR > 14 && hash2(vi * 7 + 1, vr * 3 + 5) < 0.22 ? '•' : p[0];
+    fput(fc0 + vi, fr0 + vr, dot, p[1]); seen = true;
   }
-  return { i, top: base - hR, base, d, seen, onScreen: i >= 0 && i < w };
+  return seen;
+}
+/** Lander palette, lit side warm gold; window and hatch lit from inside. */
+function landerPal(lit) {
+  return { ...metalPal(lit), a: ['•', '#c8d0dc'], A: ['●', lit ? '#e8eef5' : '#8a929e'], W: ['●', '#6fb6ff'], o: ['●', '#2a3038'],
+    G: ['●', lit ? '#f0c060' : '#b8862e'], g: ['•', lit ? '#b8862e' : '#6a4e1e'], n: ['●', '#3a3f48'] };
 }
 /** The site's objects as sprites. Colours carry state: lit panels, a dish that has Earth, a spent station. */
 function worldObjects() {
-  const s = state.sky, out = [], sunR = angDiff(s.sun.az, (state.rover ? state.rover.hd : state.hd)) > 0;
-  const lit = (a, b) => sunR ? a : b;
+  const s = state.sky, out = [], lit = !!s.sunVis;
+  const blink = Math.floor(state.anim * 2) % 2, M = metalPal(lit);
   if (state.land) {
     const L = state.land, P = c => kmOf(L.c + c, L.r);
-    out.push({ ...P(0), tag: 'LANDER', spr: SPRITES.lander, color: C.white, pal: { A: ['●', '#e8eef5'], a: ['•', '#8a929e'], G: ['●', lit('#f0c060', '#b8862e')], g: ['•', '#6a4e1e'], l: ['∙', '#9aa4b4'], n: ['•', '#4a505a'] } });
-    out.push({ ...P(-2), tag: 'ARRAY', spr: SPRITES.array, color: s.lSun ? C.amber : '#6a5a40', pal: { P: ['●', s.lSun ? '#ffb347' : '#5a4a30'], p: ['•', s.lSun ? '#3a5aa0' : '#22304a'], m: ['∙', '#8a929e'] } });
-    out.push({ ...P(2), tag: 'DISH', spr: SPRITES.dish, color: s.lEarth ? C.earth : C.earthDim, pal: { D: ['●', '#c8d0dc'], d: ['•', s.lEarth ? C.earth : C.earthDim], m: ['∙', '#8a929e'] } });
+    out.push({ ...P(0), tag: 'LANDER', spr: SPRITES.lander, color: C.white, pal: landerPal(lit) });
+    out.push({ ...P(-2), tag: 'ARRAY', spr: SPRITES.array, color: s.lSun ? C.amber : '#6a5a40', pal: { ...M, P: ['●', s.lSun ? '#3a6ad0' : '#1c2a48'], p: ['•', s.lSun ? '#ffb347' : '#3a3020'] } });
+    out.push({ ...P(2), tag: 'DISH', spr: SPRITES.dish, color: s.lEarth ? C.earth : C.earthDim, pal: { ...M, D: ['●', lit ? '#dde3ec' : '#7a828e'], d: ['•', s.lEarth ? C.earth : C.earthDim], h: ['●', s.lEarth ? (blink ? '#ffffff' : C.earth) : '#3a4a60'] } });
   }
-  const blink = Math.floor(state.anim * 2) % 2;
   const stn = (list, kind, tag, col, colDone, spr) => list.forEach(([c, r], i) => {
     const done = usesLeft(kind + i) <= 0, name = list.length > 1 ? `${tag} ${i + 1}` : tag;
-    out.push({ ...kmOf(c, r), tag: name, spr, color: done ? colDone : col, done, pal: { b: ['●', done ? colDone : blink ? col : '#ffffff'], m: ['∙', '#9aa4b4'], M: ['•', '#c8d0dc'], R: ['●', lit('#b8b0a0', '#7a7468')], r: ['•', '#5a564e'] } });
+    out.push({ ...kmOf(c, r), tag: name, spr, color: done ? colDone : col, done, pal: {
+      ...M, B: ['●', done ? colDone : blink ? col : '#ffffff'],
+      S: ['●', lit ? '#d8dee8' : '#6a727e'], s: ['•', lit ? '#8a929e' : '#3a3f48'], L: ['●', done ? '#444' : col],
+      R: ['●', lit ? '#c8a060' : '#6a5430'], r: ['•', '#3a3020'], d: ['●', col],
+    } });
   });
   stn(SITE.survey, 'survey', 'SURVEY', C.amber, '#5a4a30', SPRITES.beacon);
   stn(SITE.drill, 'drill', 'DRILL', C.white, '#666', SPRITES.rig);
   stn(SITE.psr_drill, 'psr', 'TERRACE DRILL', '#6fb6ff', '#2a4060', SPRITES.rig);
-  state.flags.forEach((f, i) => out.push({ ...kmOf(f.c, f.r), tag: `FLAG ${i + 1}`, spr: SPRITES.flag, color: C.ui, pal: { m: ['∙', '#c8d0dc'], F: ['•', C.ui] } }));
+  state.flags.forEach((f, i) => out.push({ ...kmOf(f.c, f.r), tag: `FLAG ${i + 1}`, spr: SPRITES.flag, color: C.ui, pal: { ...M, F: ['●', C.ui], W: ['•', '#d8f0e0'] } }));
   return out;
 }
 /** Draw the world into a rect of fine cells: terrain, Sun, Earth, transmit pulses. Returns what overlays need. */
@@ -1324,9 +1383,10 @@ function composeHeader() {
   str(COLS - 1 - right.length, 0, right, C.uiDim);
 }
 function composePlay() {
-  clearGrid(); fx.sun = null; fx.earth = null; fx.red = 0;
+  clearGrid(); fx.sun = null; fx.earth = null; fx.red = 0; fx.holes = null;
   if (state.phase === 'surface' && !state.instr) composeSurface(); else composeInstruments();
   if (state.dialog) composeDialog();
+  else if (state.tour) composeTour();
 }
 /** The full instruments (orbit, or TAB held on the surface): 360° skyline, map, Earth, status, radio, bar. */
 function composeInstruments() {
@@ -1600,47 +1660,70 @@ function composeBarSlim() {
   sep(); seg(`EARTH ${sgn(s.earth.el, 1)}° `, C.earthDim); seg(s.earthVis ? `EARTHSET IN ${fmtH(s.earthNext)}` : `EARTHRISE IN ${fmtH(s.earthNext)}`, C.earthDim);
   sep(); seg(`DISH ${s.lEarth ? 'LINK' : 'BLIND'}`, s.lEarth ? C.earthDim : C.red);
   sep(); seg(`ASCENT IN ${fmtH(toDep)}`, toDep < tune.danger_depart ? C.red : C.uiDim);
-  bottomText(0, 44, COLS, 'W/S throttle · A/D steer · E work · Z wait 1h · hold TAB instruments · ENTER at lander: launch · ESC · M', C.uiDark);
+  bottomText(0, 44, COLS, 'W/S throttle · A/D steer · E work · Z wait 1h · hold TAB instruments · ENTER at lander: launch · H tour · ESC · M', C.uiDark);
 }
-/** Powered descent and ascent: the camera rides the lander, the world ray-marched underneath. */
+/**
+ * Powered descent and ascent, filmed from the ground: a camera on a short mast a little way off, side-lit by
+ * the low Sun, tilting to follow the lander down (dust blooming out under the engine) or the ascent stage up
+ * (the descent stage stays behind as its launch pad).
+ */
 function composeCut() {
   clearGrid(); fx.sun = null; fx.earth = null; fx.red = 0;
-  const c = state.cut, dur = c.kind === 'landing' ? tune.cut_landing : tune.cut_launch, hit = CUT_HIT[c.kind] * dur;
-  const L = kmOf(state.land.c, state.land.r), w = COLS * FX, rows = 39 * FY, fr0 = 3 * FY;
-  const hd0 = sunAt(state.landOff).az, tH = c.kind === 'landing' ? state.landOff : state.t;
-  const dprTrue = (tune.pov_fov / w) * FW / FH;
-  let alt, back, pitch, hd = hd0, dpr, shake = 0;
-  if (c.kind === 'landing') {
-    const s = Math.min(1, c.t / hit), u = 1 - s;
-    alt = 1.2 * Math.pow(u, 1.7); back = 1.6 * u * u;
-    pitch = -Math.atan2(alt, 0.25 + 1.2 * u) * R2D * 0.9;
-    dpr = dprTrue + (tune.pov_deg_row - dprTrue) * Math.pow(s, 3);
-    if (Math.abs(c.t - hit) < 0.6) shake = (hash2(Math.floor(c.t * 30), 1) - 0.5) * 6;
+  const c = state.cut, landing = c.kind === 'landing', dur = landing ? tune.cut_landing : tune.cut_launch, hitT = CUT_HIT[c.kind] * dur;
+  const L = kmOf(state.land.c, state.land.r), tH = landing ? state.landOff : state.t;
+  const w = COLS * FX, rows = 38 * FY, fr0 = 3 * FY;
+  const sun = sunAt(tH), azc = (sun.az + 62) % 360, dist = tune.cut_cam_dist;
+  const cx = L.x + Math.sin(azc * D2R) * dist, cy = L.y - Math.cos(azc * D2R) * dist;
+  let alt, shake = 0, engine;
+  if (landing) {
+    const s = Math.min(1, c.t / hitT);
+    alt = tune.cut_alt * Math.pow(1 - s, 1.7); engine = c.t < hitT ? 1 : 0;
+    if (Math.abs(c.t - hitT) < 0.5) shake = (hash2(Math.floor(c.t * 30), 1) - 0.5) * 5;
   } else {
-    const s = Math.max(0, (c.t - hit) / (dur - hit));
-    alt = 2.6 * Math.pow(s, 2.2); back = 0; hd = hd0 + 25 * s;
-    pitch = -(3 + 32 * Math.min(1, s * 1.4));
-    dpr = tune.pov_deg_row + (dprTrue - tune.pov_deg_row) * Math.min(1, s * 2);
-    if (c.t < hit + 0.8) shake = (hash2(Math.floor(c.t * 30), 2) - 0.5) * (c.t < hit ? 2 : 5);
+    const s = Math.max(0, (c.t - hitT) / Math.max(0.1, dur - hitT));
+    alt = tune.cut_alt * 1.6 * Math.pow(s, 2); engine = c.t >= hitT - 0.25 ? 1 : 0;
+    if (c.t > hitT - 0.25 && c.t < hitT + 0.8) shake = (hash2(Math.floor(c.t * 30), 2) - 0.5) * 4;
   }
-  const x = L.x - Math.sin(hd0 * D2R) * back, y = L.y + Math.cos(hd0 * D2R) * back;
-  const cam = { x, y, eye: hgt(x, y) + tune.eye_h * 2 + alt, hd, pitch, roll: 0, dpc: tune.pov_fov / w, dpr, hr: rows * tune.pov_horizon + shake, t: tH };
-  const W = drawWorld(cam, w, rows, 0, fr0);
-  if (c.kind === 'launch') { // the rover, parked where you left it
-    const R = state.rover;
-    if (R) sprite(W, R.x, R.y, SPRITES.rover, { t: ['∙', '#9aa4b4'], C: ['●', '#c8d0dc'], c: ['•', '#7a828e'], W: ['●', '#4a505a'], w: ['•', '#30343c'] }, 2);
+  const eye = hgt(cx, cy) + 0.006, hd = Math.atan2(L.x - cx, -(L.y - cy)) * R2D;
+  const craftH = (landing ? SPRITES.lander.h : SPRITES.ascent.h) / 1000, craftAlt = landing ? alt : alt + SPRITES.descent.h / 1000;
+  const elC = Math.atan2(hgt(L.x, L.y) + craftAlt + craftH / 2 - eye, dist) * R2D;
+  const dpc = tune.pov_fov / w, dpr = dpc * FW / FH; // true vertical scale here: the craft is enlarged instead, so sky and ground share the frame
+  const cam = { x: cx, y: cy, eye, hd, pitch: Math.max(0, elC - 12), roll: 0, dpc, dpr, hr: rows * tune.pov_horizon + shake, t: tH, sprScale: tune.cut_scale };
+  const W = drawWorld(cam, w, rows, 0, fr0), lit = !!state.sky.sunVis;
+  // the rest of the base, so the ascent has somewhere to leave from
+  if (!landing) {
+    for (const m of worldObjects()) if (m.tag !== 'LANDER') sprite(W, m.x, m.y, m.spr, m.pal);
+    if (state.rover) sprite(W, state.rover.x, state.rover.y, SPRITES.rover, { ...metalPal(lit), t: ['∙', '#9aa4b4'], S: ['●', '#c8d0dc'], R: ['●', lit ? '#d8dee8' : '#7a828e'], r: ['•', '#4a505a'], W: ['●', '#30343c'], w: ['•', '#22252b'] }, 2);
+    sprite(W, L.x, L.y, SPRITES.descent, landerPal(lit), 3, 0, rows);
+  }
+  const P = sprite(W, L.x, L.y, landing ? SPRITES.lander : SPRITES.ascent, landerPal(lit), 4, craftAlt, rows);
+  if (P && engine) { // the engine plume, and dust blown flat across the ground (no air to hold it up)
+    const gRow = W.rowAt(P.i) - Math.atan2(hgt(L.x, L.y) - eye, dist) * R2D / cam.dpr, k = Math.floor(state.anim * 30);
+    const p0 = P.base - (landing ? 0.22 * P.hR : 0), len = Math.max(4, Math.min(gRow - p0, P.hR * (landing ? 1.6 : 1.2)));
+    for (let r = 0; r < len; r++) {
+      const half = 1 + r * 0.22 * (P.wC / Math.max(4, P.hR));
+      for (let cc = -half; cc <= half; cc++) {
+        const h = hash2(Math.floor(P.i + cc) * 3 + k, r * 5 + k * 7), fade = r / len;
+        if (h > 0.75 - 0.5 * fade * fade) continue;
+        fput(W.fc0 + P.i + cc, fr0 + p0 + r, fade < 0.2 ? '●' : fade < 0.55 ? '•' : '·', fade < 0.2 ? '#ffffff' : fade < 0.5 ? '#ffe2a8' : '#ffb347');
+      }
+    }
+    const near = landing ? clamp(1 - alt / 0.12, 0, 1) : clamp(1 - alt / 0.08, 0, 1);
+    if (near > 0) for (let n = 0; n < 420 * near; n++) {
+      const u = hash2(n * 13 + 1, k + n) * 2 - 1, spread = P.wC * (1.2 + 3.5 * near) * Math.sign(u) * Math.pow(Math.abs(u), 0.7);
+      const lift = hash2(n * 7 + 3, k * 3 + n) * 12 * near * (1 - Math.abs(u) * 0.6);
+      fput(W.fc0 + P.i + spread, fr0 + gRow - 1 - lift, hash2(n, k) < 0.45 ? '•' : '∙', hash2(n + 5, k) < 0.5 ? '#f0e8d8' : '#c8c0b0');
+    }
   }
   for (const q of state.vfx) fput(q.u * w, fr0 + q.v * rows, q.ch, q.color);
-  // the lander's window frame
-  for (let r = 3; r < 42; r++) { put(0, r, '▐', '#1c2026'); put(COLS - 1, r, '▌', '#1c2026'); }
-  const altM = Math.round(alt * 1000), title = c.kind === 'landing' ? (c.t < hit ? `POWERED DESCENT · ALT ${altM} m · RIDGE BASE` : 'CONTACT · ENGINE STOP') : (c.t < hit ? 'ASCENT ENGINE ARM' : `ASCENT · ALT ${altM} m · GOING HOME`);
+  // letterbox, title and comms
+  const altM = Math.round(alt * 1000), title = landing ? (c.t < hitT ? `POWERED DESCENT · ALT ${altM} m · RIDGE BASE` : 'CONTACT · ENGINE STOP') : (c.t < hitT ? 'ASCENT ENGINE ARM' : `ASCENT · ALT ${altM} m · GOING HOME`);
   strC(1, title, C.amber);
   strC(2, `MISSION ${state.mi + 1}/3 · ${mission().name} · T+${tH.toFixed(1)}h`, C.uiDim);
   const m = state.msgs[state.msgs.length - 1];
-  if (m && m.age < tune.subtitle_secs) wrap(m.text.slice(0, Math.floor(m.shown)), 110).slice(0, 2).forEach((l, k) => strC(42 + k, l, m.color));
+  if (m && m.age < tune.subtitle_secs) wrap(m.text.slice(0, Math.floor(m.shown)), 110).slice(0, 2).forEach((l, k) => strC(41 + k, l, m.color));
   str(COLS - 16, 44, '[ENTER] SKIP', C.uiDark);
 }
-
 function composeLander() {
   const L = state.land, x = MAP_C0 + L.c, y = MAP_R0 + L.r, s = state.sky;
   const a8 = az => Math.round((((az % 360) + 360) % 360) / 45) % 8;
@@ -1717,7 +1800,7 @@ function composeBar() {
     const [hint, hcol] = surfaceHint();
     seg(hint || `ASCENT IN ${fmtH(state.depart - state.t)}`, hint ? hcol : C.uiDim);
   }
-  bottomText(0, 44, COLS, orbit ? (state.view === 'pov' ? 'ARROWS move scout · Q/E look · V map · F flag · [ ] hour · ENTER land · ESC pause · M mute' : 'ARROWS move scout · F flag · [ ] landing hour · 1-3 jump · V ground view · ENTER land · ESC · M')
+  bottomText(0, 44, COLS, orbit ? (state.view === 'pov' ? 'ARROWS move scout · Q/E look · V map · F flag · [ ] hour · ENTER land · H tour · ESC · M' : 'ARROWS move scout · F flag · [ ] landing hour · 1-3 jump · V ground view · ENTER land · H tour · ESC · M')
     : 'INSTRUMENTS · release TAB (or V) for the visor · W/S A/D keep driving · ESC pause · M mute', C.uiDim);
 }
 function composeDialog() {
@@ -1759,6 +1842,99 @@ function logoWord(word, r0, reveal) {
   }
 }
 const titleProf = () => profile(78, 8);
+
+// ---- The walkthrough: a numbered tour of the screen, the controls and the choices ----------
+// Each step lights one part of the screen (the rest dims) and explains it in plain words. It runs once per
+// session in Mission 1 (orbit, then again after touchdown); H shows the current one again.
+const TOUR = {
+  orbit: [
+    { title: 'WELCOME TO RIDGE BASE', text: [
+      'You run a crewed landing near the Moon\'s south pole. Land, collect science, send it home to Earth, and get the crew back to the lander before the ascent window closes.',
+      'Down here the Sun and Earth crawl along the horizon, and the ridges hide them. Reading that skyline is the whole game.',
+      'This tour takes about a minute.'] },
+    { title: 'THE SKYLINE', rect: [0, 1, COLS, 13], cap: [36, 16], text: [
+      'The full 360° view from the scout (the + on the map). The jagged line is the real horizon of ridges.',
+      'The Sun (*) and Earth (O) slide slowly along it. Above the line means visible from here. Behind a ridge means hidden, even when they are "up".'] },
+    { title: 'THE SITE MAP', rect: [0, 14, 102, 28], cap: [38, 1], text: [
+      'The landing site from above. Bright ground is in sunlight right now; black is shadow; blue dots are craters that never see the Sun (ice).',
+      '[S] survey stations need sunlight. [D] drill sites work anywhere and pay more in the blue terrace.',
+      'Move the scout with the ARROW keys and watch the skyline and shadows change.'] },
+    { title: 'WHAT THE NUMBERS MEAN', rect: [0, 42, COLS, 3], cap: [24, 12], w: 94, text: () => { const s = state.sky; return [
+      'These are the live numbers for where the scout is right now.',
+      `LANDING T+${state.landOff}h: the hour you touch down. [ and ] change it.`,
+      `SUN ${sgn(s.sun.el)}°: the Sun's height above a flat horizon.`,
+      `${s.sunVis ? 'CLEARS SKYLINE' : 'HIDDEN BY RIDGE'} ${sgn(s.sun.el - s.hzSun)}°: how far the Sun sits above the ridge from this spot. Negative means hidden: no light here.`,
+      `${s.sunVis ? 'SUNSET' : 'SUNRISE'} IN ${fmtH(s.sunNext)}: hours until that changes here, ridges included. For a landing site a long SUNSET IN is better: the panels need it.`,
+      `EARTH ${sgn(s.earth.el, 1)}° ${s.earthVis ? 'IN VIEW' : 'HIDDEN'}, ${s.earthVis ? 'EARTHSET' : 'EARTHRISE'} IN ${fmtH(s.earthNext)}: the same for Earth. The dish can only send data while Earth is in view.`]; } },
+    { title: 'EARTH', rect: [102, 14, 40, 11], cap: [40, 15], text: [
+      'Earth\'s phase and position. HIDDEN BY THE RIDGE means nothing you send will arrive until it rises.'] },
+    { title: 'COMPARE SITES WITH FLAGS', rect: [102, 25, 40, 10], cap: [40, 20], text: [
+      'Press F to plant up to 3 flags. Each shows how much of the mission that spot gets Sun and Earth, and a timeline: █ both, ▀ Sun only, ▄ Earth only, · dark.',
+      'Keys 1 to 3 jump back to a flag.'] },
+    { title: 'PICK A GOOD LANDING SITE', text: [
+      '+ In sunlight now, with a long SUNSET IN: the panels keep the battery up.',
+      '+ Earth in view, or EARTHRISE IN a few hours: the dish can send your data.',
+      '+ Flat, lit ground: steep or never-lit ground is refused.',
+      '+ Close to [S] and [D] stations, so the drives are short.',
+      'Press ENTER to land. V shows the ground view from the scout first.'] },
+  ],
+  surface: [
+    { title: 'YOU ARE DOWN', text: [
+      'You drive the rover in real time, and the mission clock is running.',
+      'W / S throttle and brake, A / D steer. Slopes slow you; anything too steep stops you dead.'] },
+    { title: 'THE OBJECTIVE', rect: [14, 1, 78, 3], cap: [24, 12], text: [
+      'This line always says the most useful thing to do next. A ◆ marks the place in the world, or an arrow on the edge of the view when it is behind you.'] },
+    { title: 'READ THE SKY, NOT THE PANELS', rect: [0, 1, 106, 41], cap: [22, 10], text: [
+      'The Sun and Earth carry their own clocks: SUNSET and EARTHSET say how long they stay above the ridges where you are.',
+      'When the battery runs low the visor frosts over from the edges, then pulses red.',
+      'Radio calls appear as subtitles; the music tightens when you are in danger.'] },
+    { title: 'THE DASHBOARD', rect: [6, 37, 96, 3], cap: [22, 22], text: [
+      'Speed, slope (GRADE) and battery. On the right, what E does where you are parked.',
+      'Stop within a few metres of a station and press E: SURVEY (needs the Sun on you), DRILL, TRANSMIT at the DISH (needs Earth), LOW-POWER WAIT at the ARRAY.'] },
+    { title: 'MAP, STATUS AND RADIO', rect: [106, 1, 36, 41], cap: [34, 12], text: [
+      'The small map shows where you are and the red dotted edge of the mission area. Leave it and you have 5 seconds to turn back.',
+      'Hold TAB (or press V) for the full instruments: the 360° skyline and the big map.'] },
+    { title: 'THE LOOP', text: [
+      '1. Survey in sunlight and drill to collect science points.',
+      '2. Drive to the DISH at the lander and TRANSMIT while Earth is up. Unsent points are worth nothing.',
+      '3. Be back at the LANDER before ASCENT, or the crew is stranded.',
+      'Press H any time to see this tour again. Good luck, Ridge Base.'] },
+  ],
+};
+const tourSeen = { orbit: false, surface: false };
+function startTour(kind) { state.tour = { kind, i: 0 }; tourSeen[kind] = true; sfx.beep(990); }
+function maybeTour(kind) { if (tune.walkthrough && state.mi === 0 && !tourSeen[kind]) startTour(kind); }
+/** Keys while the tour is up: ENTER / → next, BACKSPACE / ← back, ESC skip. The game waits. */
+function tourUpdate() {
+  const T = state.tour, n = TOUR[T.kind].length;
+  if (pressed('Enter') || pressed('Space') || pressed('ArrowRight') || pressed('KeyD')) { T.i++; sfx.click(); if (T.i >= n) { state.tour = null; sfx.beep(1320); } }
+  else if ((pressed('Backspace') || pressed('ArrowLeft') || pressed('KeyA')) && T.i > 0) { T.i--; sfx.click(); }
+  else if (pressed('Escape')) { state.tour = null; sfx.beep(660); }
+}
+function composeTour() {
+  const T = state.tour, steps = TOUR[T.kind], st = steps[T.i], n = steps.length, holes = [];
+  const blink = Math.floor(state.anim * 2.5) % 2;
+  if (st.rect) {
+    const [c, r, w, h] = st.rect;
+    box(c, r, w, h, blink ? C.amber : '#ffd890');
+    str(c + 2, r, ` ${T.i + 1} `, C.amber);
+    holes.push([c, r, w, h]);
+  }
+  const cw = st.w || 70, lines = [];
+  (typeof st.text === 'function' ? st.text() : st.text).forEach((p, k) => { if (k) lines.push(''); wrap(p, cw - 6).forEach(l => lines.push(l)); });
+  const ch = lines.length + 6;
+  let [cc, cr] = st.cap || [Math.floor((COLS - cw) / 2), Math.floor((ROWS - ch) / 2)];
+  cc = clamp(cc, 0, COLS - cw); cr = clamp(cr, 0, ROWS - ch);
+  fillRect(cc, cr, cw, ch, NB, '#000');
+  box(cc, cr, cw, ch, C.amber, `STEP ${T.i + 1} OF ${n} · ${st.title}`, C.amber);
+  lines.forEach((l, k) => str(cc + 3, cr + 2 + k, l, l.startsWith('+') || /^\d\./.test(l) ? C.ui : C.white));
+  const dots = steps.map((_, k) => k === T.i ? '●' : '·').join(' ');
+  str(cc + 3, cr + ch - 2, dots, C.amber);
+  const foot = T.i < n - 1 ? '[ENTER] NEXT · [←] BACK · [ESC] SKIP' : '[ENTER] START · [←] BACK';
+  str(cc + cw - 3 - foot.length, cr + ch - 2, foot, blink ? C.amber : C.uiDim);
+  holes.push([cc, cr, cw, ch]);
+  fx.holes = holes;
+}
 
 // ---- Scenes ---------------------------------------------------------------------------
 function tickAnims(dt) {
@@ -1899,11 +2075,13 @@ const scenes = {
   play: {
     update(dt) {
       tickAnims(dt);
+      if (state.tour && !state.dialog) { tourUpdate(); musicUpdate(playMood()); return; }
       if (pressed('Escape') || pressed('KeyP')) { scene = 'pause'; return; }
+      if (pressed('KeyH') && !state.dialog) { startTour(state.phase === 'orbit' ? 'orbit' : 'surface'); return; }
       if (state.dialog) {
         if (pressed('Enter') || pressed('Space') || pressed('KeyE')) {
           if (state.dialog.shown < state.dialog.text.length) state.dialog.shown = state.dialog.text.length;
-          else { state.dialog = null; sfx.beep(880); }
+          else { state.dialog = null; sfx.beep(880); maybeTour(state.phase === 'orbit' ? 'orbit' : 'surface'); }
         }
         musicUpdate(playMood());
         return;
