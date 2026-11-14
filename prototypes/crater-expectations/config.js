@@ -134,6 +134,9 @@ window.CONFIG = {
   fly_pad_m: { value: 30, min: 5, max: 100, step: 5 },             // m, beacon ring radius: inside counts as on the pad
   fly_score: { value: 40, min: 0, max: 150, step: 5 },             // points for a soft landing on the pad (half off it)
   fly_auto_pen: { value: 25, min: 0, max: 100, step: 5 },          // points the autopilot (TAB) costs
+  fly_assist: { value: 1, min: 0, max: 1, step: 1 },              // 1: the computer brakes a fall you could not stop, and levels and steadies her in the last metres (free)
+  fly_assist_alt: { value: 15, min: 0, max: 60, step: 1 },         // m, below this the assist levels the lander and kills drift whenever you let go of the tilt keys
+  fly_crash_ends: { value: 0, min: 0, max: 1, step: 1 },           // 1: a touchdown outside the limits loses the lander; 0: a hard landing, no landing points, the mission goes on
   fly_lamp_m: { value: 70, min: 10, max: 300, step: 5 },           // m, landing-light pool on a shadowed pad
   fly_scale: { value: 2.5, min: 1, max: 8, step: 0.25 },           // lander drawn this much bigger in the descent view
   // ---- fragile cargo: samples on board crack on hard bumps ----

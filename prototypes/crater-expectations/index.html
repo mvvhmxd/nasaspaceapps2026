@@ -36,7 +36,7 @@ const FONT = '"DejaVu Sans Mono", Consolas, "Courier New", monospace';
 const TITLE = 'Crater Expectations';
 const CONTROLS = [
   'ORBIT    arrows/WASD move scout   F plant flag   [ ] landing hour   V ground view (Q/E look)   ENTER land',
-  'LANDING  ↑ throttle   ← → tilt   TAB autopilot (costs points)   touch down under 2 m/s and 8° tilt, on flat ground',
+  'LANDING  ↑ throttle   ← → tilt   TAB autopilot (costs points)   aim: under 2 m/s and 8° tilt; the assist catches a fall',
   'ROVER    W/S throttle   A/D steer   E work   Q ping (find ice)   Z wait 1h   hold TAB instruments   ENTER at lander: launch',
   'ANY      H walkthrough   M mute   ESC pause   ENTER dialogs / skip cutscenes   TITLE  P planner   V validation',
 ];
@@ -1396,6 +1396,7 @@ function startDescent() {
   scene = 'descent'; sfx.static(0.4);
   radio('CAPCOM: Lander, Houston. You are GO for powered descent.', C.ui);
   radio('CAPCOM: She is yours, Commander. Throttle up, tilt to kill the drift, and set her down soft.', C.ui);
+  if (tune.fly_assist) radio('LANDER: Landing assist armed. It brakes if you fall too fast and steadies her in the last metres.', C.white);
   if (dark) radio('LMP: The pad is in shadow. Landing lights only. Watch the ground come up.', '#bfe8ff');
   else if (sun.el < 1.2) radio(`LMP: Sun is only ${sun.el.toFixed(1)}° up. Long shadows across the pad.`, '#bfe8ff');
   if (slope > tune.fly_slope_max * R2D * 0.6) radio(`LMP: Ground slope at the pad is ${Math.round(slope)}°. The limit is ${Math.round(Math.atan(tune.fly_slope_max) * R2D)}. Tight margin.`, C.amber);
@@ -1408,7 +1409,7 @@ function autoPilot(F, alt) {
   if (alt < 15 && Math.abs(F.vx) > 0.7) vzT = Math.max(vzT, -0.3);
   const axD = alt < 2 ? 0 : alt < 10 ? -0.8 * F.vx : -0.06 * F.u - 0.55 * F.vx;
   const tilt = clamp(Math.atan(axD / tune.fly_g) * R2D, -15, 15);
-  return { thr: clamp(((vzT - F.vz) * 1.5 + tune.fly_g) / (tune.fly_thrust * Math.cos(F.tilt * D2R)), 0, 1), tilt };
+  return { thr: clamp(((vzT - F.vz) * 1.5 + tune.fly_g) / (tune.fly_thrust * Math.cos(F.tilt * D2R)), 0, 1), tilt, vzT };
 }
 /** One step of the flight: throttle and tilt (rate-limited), thrust against lunar gravity, fuel, callouts, contact. */
 function descentUpdate(dt) {
@@ -1416,8 +1417,8 @@ function descentUpdate(dt) {
   F.t += dt;
   if (F.end) {
     F.endT += dt;
-    musicUpdate({ breath: 1, cold: F.end === 'crash' ? 1 : 0, home: F.end === 'down' ? 1 : 0, hollow: F.end === 'crash' ? 1 : 0 });
-    if (F.endT > (F.end === 'down' ? 2.4 : 3)) finishDescent();
+    musicUpdate({ breath: 1, cold: F.end === 'crash' ? 1 : 0, home: F.end !== 'crash' ? 1 : 0, hollow: F.end === 'crash' ? 1 : 0 });
+    if (F.endT > (F.end === 'crash' ? 3 : 2.4)) finishDescent();
     return;
   }
   if (pressed('Tab')) {
@@ -1426,7 +1427,18 @@ function descentUpdate(dt) {
   }
   let P = flyPos(F), alt = F.z - hgt(P.x, P.y) * 1000, thrT, tiltT;
   if (F.auto) ({ thr: thrT, tilt: tiltT } = autoPilot(F, alt));
-  else { thrT = k(['ArrowUp', 'KeyW', 'Space']) ? 1 : 0; tiltT = ((k(['ArrowRight', 'KeyD']) ? 1 : 0) - (k(['ArrowLeft', 'KeyA']) ? 1 : 0)) * tune.fly_tilt_max; }
+  else {
+    const tiltIn = (k(['ArrowRight', 'KeyD']) ? 1 : 0) - (k(['ArrowLeft', 'KeyA']) ? 1 : 0);
+    thrT = k(['ArrowUp', 'KeyW', 'Space']) ? 1 : 0; tiltT = tiltIn * tune.fly_tilt_max; F.assisting = false;
+    if (tune.fly_assist) { // the landing assist: you fly it, the computer only catches what you could not
+      const ap = autoPilot(F, alt);
+      if (F.vz < ap.vzT * 1.15 - 0.3 && ap.thr > thrT) { thrT = ap.thr; F.assisting = true; } // falling faster than she can still stop: brake
+      if (alt < tune.fly_assist_alt) {
+        if (!tiltIn) { tiltT = ap.tilt; if (Math.abs(F.vx) > 0.3 || Math.abs(F.tilt) > 2) F.assisting = true; } // hands off: level her, kill the drift
+        tiltT = clamp(tiltT, -(tune.fly_tilt_safe - 2), tune.fly_tilt_safe - 2); // never tip past the leg limit this low
+      }
+    }
+  }
   const rr = tune.fly_throttle_rate * dt, tr = tune.fly_tilt_rate * dt;
   F.thr = clamp(F.thr + clamp(thrT - F.thr, -rr, rr), 0, 1); F.tilt += clamp(tiltT - F.tilt, -tr, tr);
   if (F.fuel <= 0) { F.thr = 0; if (!F.called.fuel0) { F.called.fuel0 = 1; radio('LANDER: Descent fuel depleted.', C.red); sfx.warn(); } }
@@ -1453,7 +1465,13 @@ function descentUpdate(dt) {
     F.touch = { vz: -F.vz, tilt: Math.abs(F.tilt), vx: Math.abs(F.vx), slope: Math.atan(sl) * R2D, off: Math.abs(F.u), fuel: F.fuel, auto: F.used, ok: !bad.length, pad: Math.abs(F.u) <= tune.fly_pad_m, bad };
     F.vz = 0; F.vx = 0; F.thr = 0;
     events.push({ type: 'touchdown', ok: !bad.length, vz: +F.touch.vz.toFixed(2), tilt: +F.touch.tilt.toFixed(1), slope: +F.touch.slope.toFixed(1), off: Math.round(F.touch.off), auto: F.used });
-    if (bad.length) {
+    if (bad.length && !tune.fly_crash_ends) { // a hard landing: rattled, no landing points, but down and the mission goes on
+      F.end = 'hard'; F.touch.hard = true; sfx.thump(1.1); sfx.warn();
+      burst(F.scr.u, F.scr.v + 0.02, 140, 1.8, '#b8b0a0', ['.', '·', '∙', '•']);
+      radio('CDR: Contact! Hard contact.', C.amber);
+      radio(`LANDER: Hard landing: ${bad.join(', ')}. Structure holding. No landing points.`, C.amber);
+      radio('CAPCOM: Ridge Base, we copy you down. Rough one, but you are down.', C.ui);
+    } else if (bad.length) {
       F.end = 'crash'; sfx.thump(1.3); sfx.warn();
       burst(F.scr.u, F.scr.v, 160, 1.8, '#ffb347', ['•', '●', '∙', '*']); burst(F.scr.u, F.scr.v, 90, 2.4, '#b8b0a0', ['.', '·', '∙']);
       radio(`LANDER: Signal lost at touchdown: ${bad.join(', ')}.`, C.red);
@@ -1567,7 +1585,7 @@ function composeDescent() {
   // the numbers: green inside the limits, amber close, red outside
   const vz = Math.max(0, -F.vz), lim = (v, m) => v <= m * 0.7 ? C.ui : v <= m ? C.amber : C.red;
   const slNow = Math.atan(slopeAt(P.x, P.y)) * R2D, slMax = Math.atan(tune.fly_slope_max) * R2D;
-  strC(0, F.end === 'down' ? 'CONTACT · ENGINE STOP' : F.end === 'crash' ? 'LANDER LOST' : `POWERED DESCENT · MISSION ${state.mi + 1}/3 · ${mission().name} · T+${state.landOff}h`, F.end === 'crash' ? C.red : C.amber);
+  strC(0, F.end === 'down' ? 'CONTACT · ENGINE STOP' : F.end === 'hard' ? 'HARD CONTACT · LANDER HOLDING' : F.end === 'crash' ? 'LANDER LOST' : `POWERED DESCENT · MISSION ${state.mi + 1}/3 · ${mission().name} · T+${state.landOff}h`, F.end === 'crash' ? C.red : C.amber);
   let x = 2;
   const seg = (t, col) => { str(x, 1, t, col); x += t.length + 3; };
   seg(`ALT ${String(Math.round(altM)).padStart(4)} m`, altM < 30 ? C.amber : C.white);
@@ -1580,7 +1598,7 @@ function composeDescent() {
   const fuelC = F.fuel < 15 ? (blink ? C.red : C.amber) : F.fuel < 35 ? C.amber : C.ui;
   str(x, 2, `FUEL ${gauge(F.fuel, 14)} ${String(Math.round(F.fuel)).padStart(3)}%`, fuelC); x += 27;
   str(x, 2, `THROTTLE ${gauge(F.thr * 100, 10)}`, F.thr > 0.05 ? C.amber : C.uiDim); x += 25;
-  str(x, 2, F.auto ? `AUTOPILOT · -${tune.fly_auto_pen} PTS` : F.used ? 'MANUAL (AUTOPILOT USED)' : 'MANUAL', F.auto ? C.amber : C.uiDim); x += 26;
+  str(x, 2, F.auto ? `AUTOPILOT · -${tune.fly_auto_pen} PTS` : F.assisting ? 'ASSIST HELPING' : `MANUAL${tune.fly_assist ? ' · ASSIST ON' : ''}${F.used ? ' · AP USED' : ''}`, F.auto ? C.amber : F.assisting && blink ? '#bfe8ff' : C.uiDim); x += 26;
   str(x, 2, F.dark ? 'PAD IN SHADOW · LANDING LIGHTS' : `SUN ${F.sunEl.toFixed(1)}° UP · LONG SHADOWS`, F.dark ? '#7fa8d8' : C.amberDim);
   // the ground across the view, from the LOLA heights: safe green, steep red; ▼ is you, ┼ the pad
   const n = 100, c0 = Math.floor((COLS - n) / 2) - 6, span = 3, hs = [];
@@ -2603,7 +2621,7 @@ function composeDebrief(win) {
   str(cols[0], tr + 1, '─'.repeat(67), C.uiDark);
   const Ld = K.land, landRow = !Ld ? ['SOFT LANDING', 'CUTSCENE', '-', '-', K.pts.land] : Ld.ok
     ? ['SOFT LANDING', `${Ld.vz.toFixed(1)}m/s·${Math.round(Ld.off)}m`, `≤ ${tune.fly_vz_max} m/s`, Ld.auto ? 'C' : Ld.pad ? 'A' : 'B', K.pts.land]
-    : ['SOFT LANDING', 'CRASHED', `≤ ${tune.fly_vz_max} m/s`, 'F', K.pts.land];
+    : ['SOFT LANDING', Ld.hard ? `HARD ${Ld.vz.toFixed(1)}m/s` : 'CRASHED', `≤ ${tune.fly_vz_max} m/s`, Ld.hard ? 'C' : 'F', K.pts.land];
   const rows = [
     landRow,
     ['SCIENCE SENT TO EARTH', `${K.sent}`, `≥ ${mDiff(undefined, 'kpi_sent', tune.kpi_sent)}`, grade(K.sent, mDiff(undefined, 'kpi_sent', tune.kpi_sent)), K.pts.sent],
