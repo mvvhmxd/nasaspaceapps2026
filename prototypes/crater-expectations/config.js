@@ -74,7 +74,7 @@ window.CONFIG = {
 
   // ---- first-person visor view ----
   pov_fov: { value: 72, min: 40, max: 120, step: 2 },             // horizontal field of view, deg
-  pov_deg_row: { value: 0.1, min: 0.03, max: 0.4, step: 0.01 },   // elevation deg per dot row (lower = taller relief)
+  pov_deg_row: { value: 0.067, min: 0.02, max: 0.4, step: 0.001 }, // elevation deg per dot row (lower = taller relief)
   pov_horizon: { value: 0.55, min: 0.15, max: 0.8, step: 0.01 },  // where the 0° line sits, share of the view height
   turn_rate: { value: 90, min: 20, max: 360, step: 10 },          // ground view from the scout: look-around, deg per second
   sun_size: { value: 7, min: 1, max: 12, step: 0.5 },             // drawn Sun size vs true (0.5°), for readability
@@ -109,10 +109,53 @@ window.CONFIG = {
   cut_launch: { value: 8, min: 3, max: 20, step: 0.5 },           // take-off cutscene, seconds
   cut_cam_dist: { value: 0.3, min: 0.05, max: 0.6, step: 0.01 }, // cutscene camera distance from the lander, km
   cut_alt: { value: 0.45, min: 0.1, max: 2, step: 0.05 },          // lander altitude when the descent shot opens, km
-  obj_scale: { value: 2.5, min: 1, max: 6, step: 0.25 },          // stations, dish, array and lander drawn this much bigger in the visor, for readability
-  obj_min_rows: { value: 7, min: 3, max: 20, step: 1 },            // smallest height (dot rows) a station is drawn at, however far
+  obj_scale: { value: 3.5, min: 1, max: 6, step: 0.25 },          // stations, dish, array and lander drawn this much bigger in the visor, for readability
+  obj_min_rows: { value: 12, min: 3, max: 30, step: 1 },           // smallest height (dot rows) a station is drawn at, however far
   cut_scale: { value: 7, min: 1, max: 8, step: 0.25 },          // how much bigger the lander is drawn in cutscenes, for readability
   walkthrough: { value: 1, min: 0, max: 1, step: 1 },              // 1: show the numbered tour in Mission 1 (H replays it)
+
+  // ---- flown landing: the last few hundred metres are yours (0 plays the old landing cutscene) ----
+  fly_landing: { value: 1, min: 0, max: 1, step: 1 },
+  fly_alt: { value: 260, min: 80, max: 800, step: 10 },            // m above the pad when you take over
+  fly_vz0: { value: 12, min: 0, max: 40, step: 1 },                // m/s, sink rate when you take over
+  fly_drift: { value: 5, min: 0, max: 20, step: 0.5 },             // m/s, largest sideways drift at take-over (seeded)
+  fly_offset: { value: 90, min: 0, max: 300, step: 10 },           // m, largest sideways miss at take-over (seeded)
+  fly_g: { value: 1.62, min: 0.5, max: 5, step: 0.01 },            // lunar gravity, m/s²
+  fly_thrust: { value: 4, min: 2, max: 10, step: 0.1 },            // m/s² at full throttle
+  fly_throttle_rate: { value: 2.5, min: 0.5, max: 10, step: 0.5 }, // throttle change per second
+  fly_tilt_max: { value: 25, min: 5, max: 45, step: 1 },           // deg, the most ← → tilts the lander
+  fly_tilt_rate: { value: 30, min: 5, max: 120, step: 5 },         // deg/s, how fast it tilts
+  fly_fuel: { value: 100, min: 10, max: 100, step: 5 },            // % descent fuel at take-over
+  fly_burn: { value: 3.6, min: 0.5, max: 10, step: 0.1 },          // % fuel per second at full throttle
+  fly_vz_max: { value: 2, min: 0.5, max: 6, step: 0.1 },           // m/s, fastest safe touchdown
+  fly_tilt_safe: { value: 8, min: 2, max: 20, step: 1 },           // deg, most tilt at touchdown
+  fly_vx_max: { value: 1.5, min: 0.2, max: 5, step: 0.1 },         // m/s, fastest safe sideways speed at touchdown
+  fly_slope_max: { value: 0.27, min: 0.05, max: 0.6, step: 0.01 }, // rise/run under the feet (about 15°), from the LOLA heights
+  fly_pad_m: { value: 30, min: 5, max: 100, step: 5 },             // m, beacon ring radius: inside counts as on the pad
+  fly_score: { value: 40, min: 0, max: 150, step: 5 },             // points for a soft landing on the pad (half off it)
+  fly_auto_pen: { value: 25, min: 0, max: 100, step: 5 },          // points the autopilot (TAB) costs
+  fly_lamp_m: { value: 70, min: 10, max: 300, step: 5 },           // m, landing-light pool on a shadowed pad
+  fly_scale: { value: 2.5, min: 1, max: 8, step: 0.25 },           // lander drawn this much bigger in the descent view
+  // ---- fragile cargo: samples on board crack on hard bumps ----
+  cargo_jolt: { value: 0.016, min: 0.005, max: 0.08, step: 0.001 }, // bump strength where samples start to crack
+  cargo_break: { value: 0.12, min: 0, max: 0.6, step: 0.01 },      // share of rock samples a bad bump breaks
+  cargo_ice_mult: { value: 2.5, min: 1, max: 6, step: 0.1 },       // ice breaks this many times more easily
+  // ---- solar storm (missions 2 and 3): a flare warning, then protons; shelter at the lander ----
+  storm_chance: { value: 0.8, min: 0, max: 1, step: 0.05 },        // chance of a storm per mission (seeded)
+  storm_lead_h: { value: 3, min: 0.5, max: 12, step: 0.5 },        // mission hours of warning before the protons arrive
+  storm_hours: { value: 6, min: 1, max: 24, step: 0.5 },           // how long the storm lasts
+  storm_dose: { value: 22, min: 1, max: 100, step: 1 },            // dose % per mission hour outside the shelter (100 ends the mission)
+  shelter_radius: { value: 0.35, min: 0.05, max: 2, step: 0.05 },  // km from the lander that counts as sheltered
+  // ---- dark crater runs ----
+  lamp_range: { value: 0.35, min: 0.05, max: 1.5, step: 0.05 },    // km, headlight reach in shadow
+  lamp_cone: { value: 50, min: 10, max: 120, step: 5 },            // deg, headlight beam width
+  ping_range: { value: 1.2, min: 0.2, max: 4, step: 0.1 },         // km, scanner ping reach (Q)
+  ping_speed: { value: 1.6, min: 0.2, max: 8, step: 0.1 },         // km/s, ping ring speed
+  ping_cost: { value: 0.3, min: 0, max: 5, step: 0.1 },            // battery % per ping
+  ice_count: { value: 5, min: 0, max: 12, step: 1 },               // hidden ice pockets round the cold-trap drill (seeded)
+  ice_yield: { value: 14, min: 1, max: 60, step: 1 },              // points per ice pocket (fragile)
+  ice_hours: { value: 0.5, min: 0.1, max: 3, step: 0.1 },          // mission hours to scoop one
+  psr_cold_mult: { value: 2.2, min: 1, max: 6, step: 0.1 },        // cold drain multiplier inside permanent shadow
 };
 
 // The site: the southern Shackleton-Henson-de Gerlache ridge, "Connecting Ridge", one of NASA's 13 Artemis III
