@@ -16,12 +16,13 @@
 <body>
 <canvas id="game"></canvas>
 <script src="config.js"></script>
+<script src="assets/data/lola-site.js"></script>
 <script>
 'use strict';
 // Crater Expectations: an ASCII lunar south-pole mission sim.
-// Everything on screen is a character on a 142x45 grid. The terrain is an analytic heightfield
-// (SITE in config.js); horizons are ray-marched from it with lunar curvature; the Sun and Earth
-// follow illustrative (placeholder) tracks. Numbers are illustrative, not a flight prediction.
+// Everything on screen is a character on a 142x45 grid. The terrain is real NASA LRO LOLA altimetry of
+// Connecting Ridge (assets/data/lola-site.js); horizons are ray-marched from it with lunar curvature; the
+// Sun and Earth follow their real 2027 paths from JPL Horizons. Rover, power and score numbers are a game model.
 
 // ---- Built to be checked ----------------------------------------------------------------
 const params = new URLSearchParams(location.search);
@@ -470,7 +471,7 @@ function musicUpdate(mood) {
   }
 }
 
-// ---- Terrain: an analytic heightfield (km) --------------------------------------------
+// ---- Terrain helpers ------------------------------------------------------------------
 const D2R = Math.PI / 180, R2D = 180 / Math.PI, MOON_R = 1737.4;
 const MC = 100, MR = 26; // map cells
 const MAP_C0 = 1, MAP_R0 = 15; // grid position of map cell 0,0
@@ -485,33 +486,47 @@ function vnoise(x, y) {
   const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
   return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
 }
-const craters = [];
-{ // small craters from a fixed terrain seed (the site never changes with ?seed)
-  let s = 7;
-  const r = () => { s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff; return s / 0x7fffffff; };
-  for (let i = 0; i < SITE.small_craters; i++) craters.push({ x: -2 + r() * 34, y: -1 + r() * 16, r: 0.35 + r() * 0.8 });
+// ---- Terrain: real heights from NASA's Lunar Orbiter Laser Altimeter (assets/data/lola-site.js) ----------
+// Two grids in the game frame (km, map y down): 80 m over the site from LDEM_85S_40M, 500 m out to the far
+// skyline from LDEM_75S_240M. Heights are metres above the 1737.4 km reference sphere; here they become km.
+function b64i16(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Int16Array(u.buffer); }
+/** Box blur of a grid (radius r cells, edges clamped), one pass along x then one along y. */
+function boxBlur(a, nx, ny, r) {
+  const t = new Float32Array(a.length), o = new Float32Array(a.length), n = 2 * r + 1;
+  for (let j = 0; j < ny; j++) { let s = 0; for (let i = -r; i <= r; i++) s += a[j * nx + Math.max(0, Math.min(nx - 1, i))];
+    for (let i = 0; i < nx; i++) { t[j * nx + i] = s / n; s += a[j * nx + Math.min(nx - 1, i + r + 1)] - a[j * nx + Math.max(0, i - r)]; } }
+  for (let i = 0; i < nx; i++) { let s = 0; for (let j = -r; j <= r; j++) s += t[Math.max(0, Math.min(ny - 1, j)) * nx + i];
+    for (let j = 0; j < ny; j++) { o[j * nx + i] = s / n; s += t[Math.min(ny - 1, j + r + 1) * nx + i] - t[Math.max(0, j - r) * nx + i]; } }
+  return o;
 }
-function bowl(d, R, depth, rim, rimW) {
-  if (d < R) { const q = d / R; return -depth * (1 - q * q) + rim; }
-  const e = (d - R) / rimW; return rim * Math.exp(-e * e);
+/** A LOLA grid in km, eased for play: blended toward a smoothed copy by tune.terrain_smooth (0 = the raw data). */
+function lolaGrid(g) {
+  const a = b64i16(g.b64), f = new Float32Array(a.length); for (let i = 0; i < a.length; i++) f[i] = a[i] / 1000;
+  const s = tune.terrain_smooth;
+  if (s > 0) { const r = Math.max(1, Math.round(tune.smooth_km / g.q)), b = boxBlur(boxBlur(f, g.nx, g.ny, r), g.nx, g.ny, r); for (let i = 0; i < f.length; i++) f[i] += (b[i] - f[i]) * s; }
+  return { x0: g.x0, y0: g.y0, q: g.q, nx: g.nx, ny: g.ny, a: f };
 }
-function height(x, y) {
-  const S = SITE.shackleton, Rg = SITE.ridge, T = SITE.terrace;
-  let z = bowl(Math.hypot(x - S.x, y - S.y), S.r, S.depth, S.rim, 2.5);
-  // connecting ridge
-  const vx = Rg.x1 - Rg.x0, vy = Rg.y1 - Rg.y0, L2 = vx * vx + vy * vy;
-  let t = ((x - Rg.x0) * vx + (y - Rg.y0) * vy) / L2; t = Math.max(0, Math.min(1, t));
-  const dr = Math.hypot(x - Rg.x0 - vx * t, y - Rg.y0 - vy * t) / Rg.w;
-  z += Rg.h * Math.exp(-dr * dr) * (t > 0.85 ? (1 - t) / 0.15 : 1) * (0.85 + 0.15 * Math.sin(t * 9));
-  z += bowl(Math.hypot(x - T.x, y - T.y), T.r, T.depth, T.rim, 0.9);
-  for (const f of SITE.far) { const dx = (x - f.x) / f.s, dy = (y - f.y) / f.s; z += f.h * Math.exp(-dx * dx - dy * dy); }
-  for (const c of craters) {
-    const d = Math.hypot(x - c.x, y - c.y);
-    if (d < c.r * 2.2) z += bowl(d, c.r, c.r * 0.35, c.r * 0.08, c.r * 0.4);
-  }
-  z += SITE.noise_amp * (vnoise(x / 4, y / 4) * 2 - 1) + SITE.noise_amp * 0.18 * (vnoise(x / 1.4 + 9, y / 1.4) * 2 - 1);
+const LF = lolaGrid(LOLA.fine), LC = lolaGrid(LOLA.coarse), REF = LOLA.frame.ref;
+/** Real height (km) at game (x, y): the LOLA data only. Every lighting verdict (cells, planner, PSR) uses this. */
+function terrain(x, y) {
+  let z = sampleGrid(LF, x, y);
+  if (z !== z) z = sampleGrid(LC, x, y);
+  if (z !== z) z = sampleGrid(LC, Math.max(LC.x0, Math.min(LC.x0 + (LC.nx - 1.01) * LC.q, x)), Math.max(LC.y0, Math.min(LC.y0 + (LC.ny - 1.01) * LC.q, y)));
   return z;
 }
+/** Real height plus a little roughness below the data's resolution, for the close-up view. */
+function height(x, y) { return terrain(x, y) + SITE.detail_amp * (vnoise(x / 0.45, y / 0.45) * 2 - 1); }
+// ---- Sky: real Sun and Earth from JPL Horizons, hourly through 2027, as seen from the map centre ----------
+const EPH = { e: b64i16(LOLA.eph.b64), n: LOLA.eph.n, t0: Date.parse(LOLA.eph.start) };
+/** Body k (0 Sun, 2 Earth) at absolute hour t since the table starts: azimuth (0 = map up) and elevation, deg. */
+function ephAt(t, k) {
+  const f = Math.max(0, Math.min(EPH.n - 1.001, t)), i = Math.floor(f), w = f - i, e = EPH.e;
+  const a0 = e[i * 4 + k] / 100; let a1 = e[(i + 1) * 4 + k] / 100;
+  if (a1 - a0 > 180) a1 -= 360; else if (a0 - a1 > 180) a1 += 360;
+  return { az: ((a0 + (a1 - a0) * w) % 360 + 360) % 360, el: (e[i * 4 + k + 1] * (1 - w) + e[(i + 1) * 4 + k + 1] * w) / 100 };
+}
+/** How a spot off the map centre sees the sky: its local "up" leans by its offset over the Moon's radius. */
+const tiltAt = (x, y, sx, sy) => ((x - REF.x) * sx + (y - REF.y) * sy) / MOON_R;
 // Cached height grids for fast lookups: fine (80 m) around the site, coarse (500 m) out to the far skyline.
 function mkGrid(x0, y0, x1, y1, q) {
   const nx = Math.round((x1 - x0) / q) + 1, ny = Math.round((y1 - y0) / q) + 1, a = new Float32Array(nx * ny);
@@ -534,7 +549,7 @@ function hgt(x, y) {
 const DISTS = []; for (let d = 0.15; d < 95; d *= 1.09) DISTS.push(d);
 const CURV = DISTS.map(d => d * d / (2 * MOON_R));
 const HM = new Float32Array(MC * MR);
-for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) HM[r * MC + c] = height(c * SITE.cell_x, r * SITE.cell_y);
+for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) HM[r * MC + c] = terrain(c * SITE.cell_x, r * SITE.cell_y);
 const NAZ = 144;
 const profCache = new Map();
 /** Horizon elevation (deg) all around a map cell, 144 azimuths, with lunar curvature. */
@@ -548,10 +563,10 @@ function profile(c, r) {
     const az = (a + 0.5) * 360 / NAZ * D2R, sx = Math.sin(az), sy = -Math.cos(az);
     let m = -1;
     for (let k = 0; k < DISTS.length; k++) {
-      const d = DISTS[k], s = (height(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d;
+      const d = DISTS[k], s = (terrain(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d;
       if (s > m) m = s;
     }
-    p[a] = Math.atan(m) * R2D;
+    p[a] = Math.atan(m) * R2D - tiltAt(x0, y0, sx, sy) * R2D;
   }
   profCache.set(key, p);
   return p;
@@ -561,38 +576,36 @@ function horizonAt(p, az) {
   const i0 = Math.floor(f), w = f - i0;
   return p[(i0 + NAZ) % NAZ] * (1 - w) + p[(i0 + 1) % NAZ] * w;
 }
-// permanently shadowed cells: the horizon beats the highest the Sun ever gets, all the way round
+// permanently shadowed cells: the horizon beats the highest the real Sun gets all year, all the way round
+const SUNMAX = new Float32Array(36).fill(-90);
+for (let i = 0; i < EPH.n; i++) { const a = Math.floor(((EPH.e[i * 4] / 100) % 360 + 360) % 360 / 10) % 36; SUNMAX[a] = Math.max(SUNMAX[a], EPH.e[i * 4 + 1] / 100); }
 const PSR = new Uint8Array(MC * MR);
 for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) {
-  const i = r * MC + c; if (HM[i] > -0.15) continue;
+  const i = r * MC + c;
   const x0 = c * SITE.cell_x, y0 = r * SITE.cell_y, h0 = HM[i];
   let psr = 1;
   for (let a = 0; a < 36 && psr; a++) {
     const az = a * 10 * D2R, sx = Math.sin(az), sy = -Math.cos(az);
-    const sunMax = Math.tan((1.6 - tune.colat * Math.cos(az)) * D2R);
+    const sunMax = Math.tan(Math.max(SUNMAX[a], SUNMAX[(a + 35) % 36], SUNMAX[(a + 1) % 36]) * D2R) + tiltAt(x0, y0, sx, sy);
     let blocked = 0;
     for (let k = 0; k < DISTS.length; k += 2) {
-      const d = DISTS[k]; if ((height(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d > sunMax) { blocked = 1; break; }
+      const d = DISTS[k]; if ((terrain(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d > sunMax) { blocked = 1; break; }
     }
     if (!blocked) psr = 0;
   }
   PSR[i] = psr;
 }
 
-// ---- Sky: illustrative Sun and Earth tracks ---------------------------------------------
+// ---- Sky: each mission starts at a real date; hour t of the mission reads the ephemeris ------------------
 function mission(mi) { return MISSIONS[mi === undefined ? state.mi : mi]; }
-/** Sun azimuth/elevation at mission hour t. Site off the pole: elevation dips toward the pole side (az 0). */
-function sunAt(t, mi) {
-  const m = mission(mi), az = ((m.sun_az0 + tune.sun_rate * t) % 360 + 360) % 360;
-  return { az, el: m.decl - tune.colat * Math.cos(az * D2R) };
-}
-/** Earth hangs low over the near side; libration rocks it up and down, left and right. */
-function earthAt(t, mi) {
-  const m = mission(mi), P = tune.lib_period;
-  const az = ((m.earth_az + tune.lib_lon_amp * Math.sin(2 * Math.PI * (t + m.lib_lon_phase) / (P * 1.01))) % 360 + 360) % 360;
-  const el = tune.lib_amp * Math.sin(2 * Math.PI * (t + m.lib_phase) / P) - tune.colat * Math.cos(az * D2R);
-  return { az, el };
-}
+/** Hours from the start of the ephemeris table to mission hour 0. */
+function missionHour(mi) { return (Date.parse(mission(mi).start) - EPH.t0) / 3600e3; }
+/** Sun azimuth/elevation at mission hour t (JPL Horizons, seen from the map centre). */
+function sunAt(t, mi) { return ephAt(missionHour(mi) + t, 0); }
+/** Earth azimuth/elevation at mission hour t, with the parallax of standing on the Moon's surface. */
+function earthAt(t, mi) { return ephAt(missionHour(mi) + t, 2); }
+/** The real UTC date and hour of mission hour t, e.g. "2027-10-17 06:00 UTC". */
+function utcAt(t, mi) { return new Date(Date.parse(mission(mi).start) + t * 3600e3).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
 function earthPhase(sun, earth) { // fraction of Earth's disc lit, seen from the Moon
   let d = Math.abs(sun.az - earth.az) % 360; if (d > 180) d = 360 - d;
   return { frac: (1 - Math.cos(d * D2R)) / 2, sep: d, side: ((sun.az - earth.az + 540) % 360) - 180 > 0 ? 1 : -1 };
@@ -618,6 +631,7 @@ function siteStats(c, r, L, D) {
 // ---- Lighting: cast shadows + hillshade + earthshine, from the real sun direction ----------
 /** Is the point (km, height h) in the shadow of the terrain for a body in direction (ssx, ssy)? */
 function shadowed(x, y, h, ssx, ssy, tanS, maxD = 95) {
+  tanS += tiltAt(x, y, ssx, ssy);
   for (let k = 0; k < DISTS.length && DISTS[k] < maxD; k += DISTS[k] > 4 ? 2 : 1) {
     const d = DISTS[k]; if ((hgt(x + ssx * d, y + ssy * d) - CURV[k] - h) / d > tanS) return true;
   }
@@ -730,8 +744,10 @@ function reset() {
 function landSlope(c, r) {
   return Math.max(...[[1, 0], [0, 1]].map(([dc, dr]) => Math.abs(HM[Math.min(MR - 1, r + dr) * MC + Math.min(MC - 1, c + dc)] - HM[r * MC + c]) / (dc ? SITE.cell_x : SITE.cell_y)));
 }
-/** The scout starts over the nearest safe ground where the Sun is just clear of the skyline. */
+/** The scout starts where the mission says (a deliberately imperfect site, so the planner has something to teach),
+ *  else over the nearest safe ground where the Sun is just clear of the skyline. */
 function findStart(mi) {
+  const ms = MISSIONS[mi].scout; if (ms) return { c: ms[0], r: ms[1] };
   const [c0, r0] = SITE.start_cursor;
   for (let rad = 0; rad < 40; rad++) for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
     if (Math.max(Math.abs(dc), Math.abs(dr)) !== rad) continue;
@@ -741,17 +757,19 @@ function findStart(mi) {
   }
   return { c: c0, r: r0 };
 }
+/** A per-mission difficulty value from MISSIONS (battery, drain, kpi_sent), else the default. */
+function mDiff(mi, k, dflt) { const v = MISSIONS[mi === undefined ? state.mi : mi][k]; return v === undefined ? dflt : v; }
 function startMission(mi, keepScores = true) {
   const sc0 = findStart(mi);
   Object.assign(state, {
     mi, phase: 'orbit', cursor: { c: sc0.c, r: sc0.r }, flags: [], landOff: 0, landMin: 0, slipDone: false,
-    t: 0, land: null, depart: 0, player: null, rover: null, battery: tune.battery_start, data: 0, sent: 0, calibrated: false,
-    uses: {}, track: [], msgs: [], particles: [], pulses: [], vfx: [], endKind: null, statCache: new Map(),
+    t: 0, land: null, depart: 0, player: null, rover: null, battery: mDiff(mi, 'battery', tune.battery_start), data: 0, sent: 0, calibrated: false,
+    uses: {}, battMin: mDiff(mi, 'battery', tune.battery_start), plan: null, track: [], msgs: [], particles: [], pulses: [], vfx: [], endKind: null, statCache: new Map(),
     view: 'map', instr: false, instrLock: false, hd: sunAt(0, mi).az, oob: 0, cut: null, said: {}, launchAsk: 0, skyT: 0, obj: null, comm: true,
     dialog: { title: `MISSION ${mi + 1}/3 · ${MISSIONS[mi].name}`, text: MISSIONS[mi].brief, shown: 0 },
   });
   if (!keepScores) state.scores = [];
-  state.score = state.scores.reduce((a, s) => a + (s ? s.sent : 0), 0);
+  state.score = state.scores.reduce((a, s) => a + (s ? s.score : 0), 0);
   updateSky();
   radio('CAPCOM: Scout is in orbit over the south pole. Sky strip is live.', C.ui);
 }
@@ -773,7 +791,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function cellOf(x, y) { return { c: clamp(Math.round(x / SITE.cell_x), 0, MC - 1), r: clamp(Math.round(y / SITE.cell_y), 0, MR - 1) }; }
 /** Does a body (az/el) clear the real terrain from an exact point and eye height? */
 function clearSky(x, y, eye, body) {
-  const a = body.az * D2R, sx = Math.sin(a), sy = -Math.cos(a), tb = Math.tan(body.el * D2R);
+  const a = body.az * D2R, sx = Math.sin(a), sy = -Math.cos(a), tb = Math.tan(body.el * D2R) + tiltAt(x, y, sx, sy);
   for (let k = 0; k < DISTS.length; k++) { const d = DISTS[k]; if ((hgt(x + sx * d, y + sy * d) - CURV[k] - eye) / d > tb) return false; }
   return true;
 }
@@ -841,8 +859,9 @@ function advance(hours, mode) {
     const sun = sunAt(state.t);
     const charge = visible(lp, sun) ? tune.charge_rate : 0;
     const cold = mode === 'live' ? state.sky.cold : !clearSky(R.x, R.y, R.eye, sun);
-    const drain = mode === 'rest' ? tune.drain_base * tune.rest_factor : tune.drain_base + (cold ? tune.drain_cold : 0);
+    const drain = mode === 'rest' ? tune.drain_base * tune.rest_factor : (tune.drain_base + (cold ? tune.drain_cold : 0)) * mDiff(undefined, 'drain', 1);
     state.battery = Math.max(0, Math.min(100, state.battery + (charge - drain) * dt));
+    state.battMin = Math.min(state.battMin, state.battery);
     if (state.battery <= 0) endMission('dead');
     else if (state.t >= state.depart - 1e-6) departNow();
   }
@@ -878,13 +897,51 @@ function checkSky(hours) {
 function endMission(kind) {
   if (state.endKind) return;
   state.endKind = kind;
-  state.scores[state.mi] = { sent: Math.round(state.sent), lost: Math.round(state.data), kind };
-  state.score = state.scores.reduce((a, s) => a + (s ? s.sent : 0), 0);
-  state.gained = `Mission ${state.mi + 1}: ${Math.round(state.sent)} science sent home`;
-  events.push({ type: kind === 'depart' ? 'mission_end' : 'fail', kind, mission: state.mi + 1, sent: state.sent });
+  const kpi = missionKpi(kind);
+  state.scores[state.mi] = { sent: kpi.sent, lost: kpi.lost, kind, kpi, score: kpi.score };
+  state.score = state.scores.reduce((a, s) => a + (s ? s.score : 0), 0);
+  state.gained = `Mission ${state.mi + 1}: score ${kpi.score}`;
+  state.plan = plannerStart();
+  events.push({ type: kind === 'depart' ? 'mission_end' : 'fail', kind, mission: state.mi + 1, sent: state.sent, score: kpi.score });
   if (state.rover) state.rover.v = 0;
   if (kind === 'depart') startCut('launch');
   else { scene = 'over'; sfx.warn(); }
+}
+/**
+ * The mission's key numbers and its score. Each KPI earns points (config: score_*): science that reached
+ * Earth, the crew home, the share of mission hours the lander's array saw the Sun and the dish saw Earth
+ * (from the real terrain and sky at the chosen site and hour), and the lowest battery; unsent science costs.
+ */
+function missionKpi(kind) {
+  const st = state.land ? siteStats(state.land.c, state.land.r, state.landOff, mission().duration) : { sun: 0, earth: 0, tl: [] };
+  const sent = Math.round(state.sent), lost = Math.round(state.data), crew = kind === 'depart', batt = Math.round(state.battMin);
+  const pts = { sent: sent * tune.score_sent, crew: crew ? tune.score_crew : 0, sun: st.sun * tune.score_sun, earth: st.earth * tune.score_earth, batt: batt * tune.score_batt, lost: -lost * tune.score_lost };
+  for (const k in pts) pts[k] = Math.round(pts[k]);
+  const score = Math.max(0, Object.values(pts).reduce((a, b) => a + b, 0));
+  return { sent, lost, crew, batt, sun: st.sun, earth: st.earth, tl: st.tl, km: state.rover ? state.rover.dist : 0, pts, score };
+}
+/** A KPI's grade against its target: A at the target, B above kpi_b of it, C above zero, F at zero. */
+function grade(v, target) { return v >= target ? 'A' : v >= target * tune.kpi_b ? 'B' : v > 0 ? 'C' : 'F'; }
+const GRADE_COL = { A: '#5fe08a', B: '#ffb347', C: '#ff7a5a', F: '#ff4040' };
+/**
+ * The planner's pick: after each mission, every landable cell on the map (flat enough, not in permanent
+ * shadow) is scored for the same landing hour and duration, sunlight share plus Earth share, the way real
+ * Artemis site studies trade power against comms. A few cells a frame, so the debrief shows it searching.
+ */
+function plannerStart() {
+  const cells = [];
+  for (let r = 1; r < MR - 1; r++) for (let c = 2; c < MC - 2; c++) if (!PSR[r * MC + c] && landSlope(c, r) <= tune.land_slope_max) cells.push([c, r]);
+  return { cells, i: 0, best: null, done: false, mi: state.mi };
+}
+function plannerRun(n) {
+  const P = state.plan; if (!P || P.done || !state.land) return;
+  const D = mission(P.mi).duration;
+  for (let k = 0; k < n && P.i < P.cells.length; k++) {
+    const [c, r] = P.cells[P.i++], s = siteStats(c, r, state.landOff, D), v = s.sun + s.earth;
+    const near = Math.hypot(c - state.land.c, (r - state.land.r) * 1.78); // ties go to the spot nearest yours
+    if (!P.best || v > P.best.v || (v === P.best.v && near < P.best.near)) P.best = { c, r, v, near, ...s };
+  }
+  if (P.i >= P.cells.length) P.done = true;
 }
 /** Departure: aboard the lander, the crew goes home; out on the rover, the window closes without you. */
 function departNow() { endMission(landerDist() <= tune.board_radius ? 'depart' : 'stranded'); }
@@ -1000,7 +1057,7 @@ function driveRover(dt) {
   if (cx !== nx || cy !== ny) { R.v = 0; nx = cx; ny = cy; }
   const moved = Math.hypot(nx - R.x, ny - R.y);
   R.x = nx; R.y = ny; R.dist += moved;
-  state.battery = Math.max(0, state.battery - moved * tune.drain_drive);
+  state.battery = Math.max(0, state.battery - moved * tune.drain_drive); state.battMin = Math.min(state.battMin, state.battery);
   const last = state.track[state.track.length - 1];
   if (!last || Math.hypot(last.x - R.x, last.y - R.y) > 0.035) { state.track.push({ x: R.x, y: R.y }); if (state.track.length > 2000) state.track.shift(); }
   // suspension: the ground's rise rate changing fast is a bump
@@ -1118,9 +1175,14 @@ function earthDisc(cx, cy, RX, sun, earth, vis, t, clip) {
     if (clip && !clip(fc, fr)) continue;
     if (!vis) { if (q > 0.8) fput(fc, fr, '.', C.earthDim); continue; }
     const nz = Math.sqrt(1 - q), I = nx * Lx + nz * Lz;
-    if (I <= 0.03) { if (q > 0.9 && hash2(x, y) < 0.5) fput(fc, fr, '.', '#13284a'); continue; }
     const lon = Math.atan2(nx, nz) * R2D + rot, lat = Math.asin(Math.max(-1, Math.min(1, -ny))) * R2D;
     const land = vnoise(lon / 38 + 50, lat / 30 + 20) > 0.6, ice = Math.abs(lat) > 68;
+    if (I <= 0.03) { // the night side: faint, so a "new Earth" can still be found; a blue rim of air, city lights on land
+      if (q > 0.86) fput(fc, fr, dotOf(0.32), '#2c5c9c');
+      else if (land && !ice && hash2(Math.round(lon * 2), Math.round(lat * 2)) < 0.12) fput(fc, fr, dotOf(0.3), '#d8a050');
+      else fput(fc, fr, dotOf(0.14), land ? '#1c2434' : '#11264a');
+      continue;
+    }
     const cl = vnoise(lon / 18 + 3 + t * 0.02, lat / 9 + 8) * 0.7 + vnoise(lon / 7, lat / 5) * 0.3;
     const k = Math.min(1, I * 1.15 + 0.05);
     let col;
@@ -1379,7 +1441,7 @@ function battColor(v) { return v > 50 ? C.ui : v > 25 ? C.amber : C.red; }
 function composeHeader() {
   str(1, 0, 'CRATER EXPECTATIONS', C.amber);
   str(22, 0, `│ MISSION ${state.mi + 1}/3 · ${mission().name} │ ${state.phase === 'orbit' ? 'ORBIT · SCOUTING' : 'SURFACE · INSTRUMENTS'}`, C.ui);
-  const right = `TOTAL SENT ${state.score + (scene === 'play' ? Math.round(state.sent) : 0)}  │ [M] ${muted ? 'SOUND OFF' : 'SOUND ON'}`;
+  const right = `SCORE ${state.score}  │ SENT ${scene === 'play' ? Math.round(state.sent) : 0}  │ [M] ${muted ? 'SOUND OFF' : 'SOUND ON'}`;
   str(COLS - 1 - right.length, 0, right, C.uiDim);
 }
 function composePlay() {
@@ -1395,7 +1457,7 @@ function composeInstruments() {
   const skyH = 13;
   box(0, 1, COLS, skyH, C.uiDim, orbit ? 'SKY FROM SCOUT · 360° SKYLINE' : 'SKY FROM THE ROVER · 360° SKYLINE', C.ui,
     orbit ? `LANDING HOUR T+${state.landOff}h` : `T+${state.t.toFixed(1)}h`);
-  bottomText(0, skyH, COLS, 'ILLUSTRATIVE EPHEMERIS · TERRAIN RAY-MARCHED WITH LUNAR CURVATURE', C.uiDark);
+  bottomText(0, skyH, COLS, 'JPL HORIZONS EPHEMERIS · TERRAIN FROM NASA LRO LOLA, SMOOTHED FOR PLAY · LUNAR CURVATURE', C.uiDark);
   const info = composeSky(s.p, s.sun, s.earth, 2, skyH - 3);
   if (!orbit) { info.sunVis = s.sunVis; info.ev = s.earthVis; }
   composeSkyLabels(skyH - 1, info);
@@ -1407,7 +1469,7 @@ function composeInstruments() {
 /** The top-down site map, in dots: 8 fine cells per map cell, stations and labels on top. */
 function composeMapBox(y0) {
   const s = state.sky, orbit = state.phase === 'orbit';
-  box(0, y0, 102, 28, C.uiDim, orbit ? 'SOUTH POLE SITE · SCOUT VIEW · [V] GROUND VIEW' : 'SOUTH POLE SITE · MISSION AREA · RELEASE TAB FOR THE VISOR', C.ui, '1 CELL ≈ 300 M');
+  box(0, y0, 102, 28, C.uiDim, orbit ? 'CONNECTING RIDGE · 89.6°S · SCOUT VIEW · [V] GROUND VIEW' : 'CONNECTING RIDGE · 89.6°S · MISSION AREA · RELEASE TAB', C.ui, '1 CELL ≈ 300 M');
   const F0 = FX * MAP_C0, R0 = FY * MAP_R0;
   for (let j = 0; j < FMR; j++) for (let i = 0; i < FMC; i++) { const n = j * FMC + i; if (mapCh[n] !== ' ') fput(F0 + i, R0 + j, mapCh[n], mapFg[n]); }
   for (const L of SITE.labels) lab(MAP_C0 + L.c, MAP_R0 + L.r, L.text, C.uiDim);
@@ -1489,7 +1551,7 @@ function composeSurface() {
   const R = state.rover;
   str(1, 0, 'CRATER EXPECTATIONS', C.amberDim);
   str(21, 0, `│ MISSION ${state.mi + 1}/3 · ${mission().name} │ T+${state.t.toFixed(1)}h`, C.uiDim);
-  const right = `SENT HOME ${state.score + Math.round(state.sent)} │ [M] ${muted ? 'SOUND OFF' : 'SOUND'}`;
+  const right = `SCORE ${state.score} · SENT ${Math.round(state.sent)} │ [M] ${muted ? 'SOUND OFF' : 'SOUND'}`;
   str(COLS - 1 - right.length, 0, right, C.uiDark);
   composeVisor(0, 1, 106, 41);
   composeSideMap(106, 1, 36, 12);
@@ -1741,6 +1803,7 @@ function composePanel(y0) {
   const ex = 121, a = y0 + 1;
   str(ex, a, `EL ${sgn(s.earth.el, 1)}°`, C.earth); str(ex, a + 1, `AZ ${Math.round(s.earth.az)}°`, C.earth);
   str(ex, a + 2, `PHASE ${Math.round(s.phase.frac * 100)}%`, C.white);
+  if (s.phase.frac < 0.15) str(ex, a + 3, 'NEW EARTH: DARK SIDE', C.earthDim);
   str(ex, a + 4, s.earthVis ? 'IN VIEW' : s.earth.el > 0 ? 'HIDDEN BY' : 'BELOW', s.earthVis ? C.ui : C.red);
   if (!s.earthVis) str(ex, a + 5, s.earth.el > 0 ? 'THE RIDGE' : 'HORIZON', C.red);
   str(ex, a + 7, `SUN ${sgn(s.sun.el)}°`, C.amber); str(ex, a + 8, `AZ ${Math.round(s.sun.az)}°`, C.amber);
@@ -1876,6 +1939,7 @@ const TOUR = {
       '+ Earth in view, or EARTHRISE IN a few hours: the dish can send your data.',
       '+ Flat, lit ground: steep or never-lit ground is refused.',
       '+ Close to [S] and [D] stations, so the drives are short.',
+      'After the mission, the debrief grades your site against the best one on this map, found by a planner that checks every landable spot.',
       'Press ENTER to land. V shows the ground view from the scout first.'] },
   ],
   surface: [
@@ -1898,6 +1962,7 @@ const TOUR = {
       '1. Survey in sunlight and drill to collect science points.',
       '2. Drive to the DISH at the lander and TRANSMIT while Earth is up. Unsent points are worth nothing.',
       '3. Be back at the LANDER before ASCENT, or the crew is stranded.',
+      'Your MISSION SCORE adds science sent, crew home, sunlight and Earth link at your site, and battery margin.',
       'Press H any time to see this tour again. Good luck, Ridge Base.'] },
   ],
 };
@@ -1934,6 +1999,89 @@ function composeTour() {
   str(cc + cw - 3 - foot.length, cr + ch - 2, foot, blink ? C.amber : C.uiDim);
   holes.push([cc, cr, cw, ch]);
   fx.holes = holes;
+}
+
+// ---- The debrief: KPIs, the score, and your site against the planner's pick --------------------------
+/** A 20-bin Sun/Earth timeline, two characters a bin: █ both, ▀ Sun only, ▄ Earth only, · dark. */
+function drawTimeline(c, r, tl) {
+  const ch = ['·', '▀', '▄', '█'], col = ['#3a4250', C.amber, C.earth, C.ui];
+  tl.forEach((v, i) => { put(c + i * 2, r, ch[v], col[v]); put(c + i * 2 + 1, r, ch[v], col[v]); });
+}
+function bigNum(c, r, n, fg) { String(n).split('').forEach((d, k) => BIG[d].forEach((row, j) => { for (let i = 0; i < 3; i++) if (row[i] === '#') put(c + k * 4 + i, r + j, '█', fg); })); }
+function composeDebrief(win) {
+  const sc = state.scores[state.mi], K = sc && sc.kpi; if (!K) return;
+  const c0 = 6, w = COLS - 12, r0 = 2, hh = 41, last = state.mi === MISSIONS.length - 1;
+  fillRect(c0, r0, w, hh, NB, '#000'); fx.sun = null; fx.earth = null; fx.red = 0;
+  const head = win ? 'CREW HOME' : { dead: 'BATTERY DEPLETED', stranded: 'CREW LEFT BEHIND', oob: 'MISSION ABORTED' }[state.endKind] || 'MISSION ENDED';
+  box(c0, r0, w, hh, win ? C.ui : C.red, `MISSION ${state.mi + 1} DEBRIEF · ${mission().name} · ${utcAt(state.landOff).slice(0, 10)}`, C.amber);
+  str(c0 + 3, r0 + 2, head, win ? C.ui : C.red);
+  if (!win) str(c0 + 3 + head.length + 2, r0 + 2, { dead: 'The rover went dark before departure.', stranded: 'The ascent window closed with the rover out on the ridge.', oob: 'Houston called the abort outside the mission area.' }[state.endKind] || '', C.uiDim);
+  // KPI table
+  const tr = r0 + 4, cols = [c0 + 3, c0 + 31, c0 + 42, c0 + 54, c0 + 62];
+  ['KEY PERFORMANCE INDICATOR', 'RESULT', 'TARGET', 'GRADE', 'POINTS'].forEach((t, i) => str(cols[i], tr, t, C.uiDim));
+  str(cols[0], tr + 1, '─'.repeat(67), C.uiDark);
+  const rows = [
+    ['SCIENCE SENT TO EARTH', `${K.sent}`, `≥ ${mDiff(undefined, 'kpi_sent', tune.kpi_sent)}`, grade(K.sent, mDiff(undefined, 'kpi_sent', tune.kpi_sent)), K.pts.sent],
+    ['CREW HOME AT ASCENT', K.crew ? 'YES' : 'NO', 'YES', K.crew ? 'A' : 'F', K.pts.crew],
+    ['LANDER IN SUNLIGHT', `${K.sun}%`, `≥ ${tune.kpi_sun}%`, grade(K.sun, tune.kpi_sun), K.pts.sun],
+    ['DISH SEES EARTH', `${K.earth}%`, `≥ ${tune.kpi_earth}%`, grade(K.earth, tune.kpi_earth), K.pts.earth],
+    ['LOWEST BATTERY', `${K.batt}%`, `≥ ${tune.kpi_batt}%`, grade(K.batt, tune.kpi_batt), K.pts.batt],
+    ['SCIENCE LEFT UNSENT', `${K.lost}`, '0', K.lost ? 'C' : 'A', K.pts.lost],
+  ];
+  rows.forEach((q, i) => {
+    const y = tr + 2 + i;
+    str(cols[0], y, q[0], C.white); str(cols[1], y, q[1], C.white); str(cols[2], y, q[2], C.uiDim);
+    str(cols[3] + 2, y, q[3], GRADE_COL[q[3]]);
+    const p = (q[4] >= 0 ? '+' : '') + q[4]; str(cols[4] + 6 - p.length, y, p, q[4] >= 0 ? C.ui : C.red);
+  });
+  str(cols[0], tr + 8, '─'.repeat(67), C.uiDark);
+  str(cols[0], tr + 9, `DROVE ${K.km.toFixed(1)} km`, C.uiDim);
+  str(cols[3] - 9, tr + 9, 'MISSION SCORE', C.amber); const sp = String(sc.score); str(cols[4] + 6 - sp.length, tr + 9, sp, C.amber);
+  // the big score and the campaign
+  const bc = c0 + 80; str(bc, tr, 'MISSION SCORE', C.uiDim); bigNum(bc, tr + 1, sc.score, C.amber);
+  str(bc, tr + 7, 'CAMPAIGN', C.uiDim);
+  MISSIONS.forEach((m, i) => { const s = state.scores[i]; str(bc, tr + 8 + i, `M${i + 1} ${m.name.padEnd(18)} ${s ? String(s.score).padStart(4) : '   -'}`, i === state.mi ? C.white : C.uiDim); });
+  str(bc, tr + 11, `TOTAL ${String(state.score).padStart(21)}`, C.amber);
+  if (last && win) {
+    const g = state.score >= tune.rate_director ? 'FLIGHT DIRECTOR' : state.score >= tune.rate_planner ? 'MISSION PLANNER' : state.score >= tune.rate_reader ? 'HORIZON READER' : 'CADET';
+    str(bc, tr + 12, `RATING ${g.padStart(20)}`, C.sun);
+  }
+  // the site debrief
+  const sr = r0 + 18, P = state.plan;
+  box(c0 + 2, sr, w - 4, 17, C.uiDim, "SITE DEBRIEF · YOUR LANDING SITE vs THE PLANNER'S PICK", C.ui);
+  const label = (y, t, col) => str(c0 + 5, y, t, col);
+  const site = (y, name, s, c, r, col) => {
+    label(y, name, col); drawTimeline(c0 + 21, y, s.tl);
+    const kmP = kmOf(c, r);
+    str(c0 + 63, y, `SUN ${String(s.sun).padStart(3)}%   EARTH ${String(s.earth).padStart(3)}%   ${(hgt(kmP.x, kmP.y) * 1000).toFixed(0).padStart(5)} m`, C.white);
+  };
+  str(c0 + 21, sr + 2, `T+${state.landOff}h`, C.uiDim); str(c0 + 54, sr + 2, `+${mission().duration}h`, C.uiDim);
+  site(sr + 3, 'YOUR SITE', K, state.land.c, state.land.r, C.amber);
+  if (!P || !P.done) {
+    const n = P ? P.cells.length : 1, i = P ? P.i : 0, f = Math.round(40 * i / n);
+    label(sr + 5, 'PLANNER', C.ui);
+    str(c0 + 21, sr + 5, '█'.repeat(f) + '░'.repeat(40 - f), C.ui);
+    str(c0 + 63, sr + 5, `CHECKING ${i}/${n} LANDABLE SITES`, C.uiDim);
+    str(c0 + 5, sr + 8, 'Scoring every flat, sunlit-at-some-point cell on the map for the same landing hour,', C.uiDim);
+    str(c0 + 5, sr + 9, 'using the real LOLA skyline and the real 2027 Sun and Earth.', C.uiDim);
+  } else {
+    const B = P.best, kmB = kmOf(B.c, B.r), kmY = kmOf(state.land.c, state.land.r);
+    site(sr + 5, "PLANNER'S PICK", B, B.c, B.r, C.ui);
+    const dx = kmB.x - kmY.x, dy = kmB.y - kmY.y, dist = Math.hypot(dx, dy), dir = DIRN[Math.round(((Math.atan2(dx, -dy) * R2D + 360) % 360) / 45) % 8];
+    const why = [], dS = B.sun - K.sun, dE = B.earth - K.earth, dH = (hgt(kmB.x, kmB.y) - hgt(kmY.x, kmY.y)) * 1000;
+    const you = K.sun + K.earth, best = B.sun + B.earth, rank = Math.round(100 * you / Math.max(1, best));
+    why.push([`Your site scored ${rank}% of the best of ${P.cells.length} landable sites. The planner's pick is ${dist.toFixed(1)} km ${dir} of yours${dist < 0.4 ? ': you found it.' : '.'}`, rank >= 95 ? C.ui : rank >= 75 ? C.amber : C.red]);
+    if (dS > 5) why.push([`Its array sees the Sun ${dS} points more of the time${dH > 60 ? `: it stands ${Math.round(dH)} m higher, so it looks over the ridges that hide the Sun from you.` : ': its view along the Sun\'s path is clearer.'}`, C.amber]);
+    if (dE > 5) why.push([`Its dish keeps Earth ${dE} points longer: ${dH > 60 ? 'higher ground clears the skyline Earth sinks behind.' : 'nothing tall stands between it and Earth.'}`, C.earth]);
+    if (dS <= 5 && dE <= 5) why.push(['Within 5 points of the best on both Sun and Earth: that is how a real site planner picks.', C.ui]);
+    why.push(['Real Artemis site studies rank landing sites the same way: hours of sunlight for power, hours with', C.uiDim]);
+    why.push(['Earth in view for comms, and gentle slopes for the lander.', C.uiDim]);
+    let y = sr + 7; for (const [t, col] of why) for (const l of wrap(t, w - 12)) { if (y < sr + 15) str(c0 + 5, ++y, l, col); }
+  }
+  str(c0 + 5, sr + 15, '█ sun + earth   ▀ sun only   ▄ earth only   · dark', C.uiDim);
+  str(c0 + w - 4 - 64, sr + 15, 'TERRAIN: NASA LRO LOLA, SMOOTHED · SKY: JPL HORIZONS DE441, 2027', C.uiDark);
+  const foot = last && win ? '[ENTER] BACK TO TITLE   [R] RETRY MISSION' : '[ENTER] NEXT MISSION   [R] RETRY MISSION';
+  strC(r0 + hh - 2, foot, Math.floor(state.anim * 2) % 2 ? C.amber : '#ffd890', c0, w);
 }
 
 // ---- Scenes ---------------------------------------------------------------------------
@@ -2068,7 +2216,8 @@ const scenes = {
       box(8, 32, 126, 7, C.uiDim, 'CONTROLS', C.ui);
       CONTROLS.forEach((c, i) => str(11, 34 + i, c, C.ui));
       if (Math.floor(state.anim * 2) % 2) strC(40, '>>  PRESS ENTER TO LAUNCH  <<', C.amber);
-      strC(43, 'Sun & Earth tracks and terrain are illustrative: a playable model of the problem, not a flight prediction.', C.uiDark);
+      strC(42, 'TERRAIN: NASA LRO / LOLA laser altimetry (LDEM 40 m + 240 m)  ·  SUN & EARTH: JPL HORIZONS EPHEMERIS, 2027', C.uiDim);
+      strC(43, 'Shackleton and its connecting ridge from the measured heights, smoothed for play. Rover, power and score are a game model.', C.uiDark);
       present();
     },
   },
@@ -2109,6 +2258,7 @@ const scenes = {
       lightTick(c.kind === 'landing' ? state.landOff : state.t, 3000);
       musicUpdate({ cue: 1, engine, breath: 1, warm: state.sky && state.sky.sunVis ? 1 : 0 });
       if (pressed('Enter') || pressed('Space') || pressed('Escape')) c.t = dur;
+      if (state.plan) plannerRun(tune.planner_cells);
       if (c.t >= dur) finishCut();
     },
     draw() { composeCut(); present(); },
@@ -2119,48 +2269,19 @@ const scenes = {
   },
   over: {
     update(dt) {
-      tickAnims(dt); musicUpdate({ cold: 1, hollow: 1 });
-      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; scene = 'play'; }
+      tickAnims(dt); musicUpdate({ cold: 1, hollow: 1 }); plannerRun(tune.planner_cells);
+      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; state.score = state.scores.reduce((a, s) => a + (s ? s.score : 0), 0); scene = 'play'; }
       else if (pressed('Enter')) nextMission();
     },
-    draw() {
-      composePlay();
-      const sc = state.scores[state.mi] || { sent: 0, lost: 0 }, kind = state.endKind;
-      const km = state.rover ? landerDist().toFixed(1) : '?';
-      const T = {
-        dead: ['BATTERY DEPLETED · MISSION ENDED EARLY', 'The rover went dark before departure.', 'Rest at the array and stay in the light: the ridge decides when you charge.'],
-        stranded: ['ASCENT WINDOW CLOSED · CREW LEFT BEHIND', `The lander had to go. You were ${km} km out on the rover.`, 'The ascent clock never stops. Turn for home while there is still light to drive by.'],
-        oob: ['MISSION ABORTED · LEFT THE MISSION AREA', `Houston called the abort after ${tune.oob_seconds} seconds outside the box.`, 'The dotted red line on the map is the edge. Stay inside it.'],
-      }[kind] || ['MISSION ENDED', '', ''];
-      overlayBox(T[0], [
-        [T[1], C.red], [''],
-        [`SCIENCE THAT REACHED EARTH   ${sc.sent}`, C.earth], [`LOST ON THE ROVER            ${sc.lost}`, C.red], [''],
-        [T[2], C.uiDim],
-      ], '[R] RETRY MISSION     [ENTER] NEXT MISSION', C.red);
-      present();
-    },
+    draw() { composePlay(); composeDebrief(false); present(); },
   },
   results: {
     update(dt) {
-      tickAnims(dt); musicUpdate({ home: 1, warm: 1 });
+      tickAnims(dt); musicUpdate({ home: 1, warm: 1 }); plannerRun(tune.planner_cells);
       if (pressed('Enter')) nextMission();
-      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; scene = 'play'; }
+      if (pressed('KeyR')) { startMission(state.mi); state.scores[state.mi] = undefined; state.score = state.scores.reduce((a, s) => a + (s ? s.score : 0), 0); scene = 'play'; }
     },
-    draw() {
-      composePlay();
-      const sc = state.scores[state.mi] || { sent: 0, lost: 0 };
-      const last = state.mi === MISSIONS.length - 1;
-      const lines = [[`CREW HOME · MISSION ${state.mi + 1}: ${mission().name}`, C.amber], [''],
-        [`SCIENCE THAT REACHED EARTH   ${sc.sent}`, C.earth], [`LEFT UNSENT ON THE ROVER     ${sc.lost}`, sc.lost ? C.red : C.uiDim], ['']];
-      if (last) {
-        state.scores.forEach((s, i) => lines.push([`MISSION ${i + 1}   ${String(s ? s.sent : 0).padStart(4)}`, C.ui]));
-        lines.push([`TOTAL SCIENCE HOME   ${state.score}`, C.amber]);
-        const grade = state.score >= 420 ? 'FLIGHT DIRECTOR' : state.score >= 260 ? 'MISSION PLANNER' : state.score >= 120 ? 'HORIZON READER' : 'CADET';
-        lines.push(['']); lines.push([`RATING: ${grade}`, C.sun]);
-      } else lines.push(['Next: a new sky, a harder trade.', C.uiDim]);
-      overlayBox(last ? 'CAMPAIGN COMPLETE' : 'MISSION COMPLETE', lines, last ? '[ENTER] BACK TO TITLE   [R] RETRY' : '[ENTER] NEXT MISSION   [R] RETRY');
-      present();
-    },
+    draw() { composePlay(); composeDebrief(true); present(); },
   },
 };
 

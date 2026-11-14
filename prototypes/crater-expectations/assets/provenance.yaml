@@ -9,3 +9,14 @@
 #   date: 2026-01-31
 #   ships: true               # false for a file only the build uses
 #   placeholder: true         # until it is replaced; leave the line out otherwise
+- path: assets/data/lola-site.js
+  origin: code
+  tool: "tools/lolabake.js (node tools/lolabake.js <data dir> assets/data/lola-site.js): resamples the LOLA DEMs to the game frame and turns Horizons sub-solar/sub-Earth points into Sun/Earth az/el"
+  model: "claude-opus-5-5 (wrote the bake script)"
+  source:
+    - {vendor: "NASA LRO LOLA team, PDS Geosciences Node", product: "LDEM_85S_40M and LDEM_75S_240M polar gridded DEMs", url: "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/"}
+    - {vendor: "NASA JPL Solar System Dynamics", product: "Horizons ephemeris, Moon (301) sub-solar and sub-Earth points, 2027 hourly, DE441", url: "https://ssd.jpl.nasa.gov/api/horizons.api"}
+  licence: {id: "LicenseRef-NASA-Public-Domain"}
+  note: "the game blends these heights toward a smoothed copy at load (config terrain_smooth, smooth_km) and says so on screen"
+  date: 2026-11-14
+  ships: true

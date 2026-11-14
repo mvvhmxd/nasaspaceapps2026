@@ -3,7 +3,8 @@
 // Date: 2026-11-13
 // Every tuning value lives here, each with value, min, max and step. The game reads them live
 // through tune.<name> (index.html); the tweak panel, an add-on, writes them back here.
-// ALL NUMBERS ARE ILLUSTRATIVE: a playable model of the south-pole lighting problem, not a flight prediction.
+// The terrain comes from NASA LRO LOLA heights, smoothed for play by terrain_smooth (0 = the raw data); the
+// Sun and Earth are JPL Horizons positions. Both are baked into assets/data/lola-site.js. The rover, power, science and score numbers below are a game model.
 window.CONFIG = {
   seed: 1, // every gameplay random call reads rng(), seeded from this (or ?seed= in the address)
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
@@ -39,14 +40,11 @@ window.CONFIG = {
   transmit_rate: { value: 25, min: 1, max: 100, step: 1 },        // points sent per burst
   station_uses: { value: 2, min: 1, max: 5, step: 1 },            // times each outcrop / drill site pays
 
-  // ---- terrain & sky model ----
-  colat: { value: 0.55, min: 0, max: 2, step: 0.05 },             // site distance from the pole, degrees
-  sun_rate: { value: 0.508, min: 0.1, max: 3, step: 0.01 },       // Sun azimuth deg/h (360 deg per 708.7 h synodic day)
-  lib_amp: { value: 6.5, min: 0, max: 10, step: 0.1 },            // Earth elevation libration amplitude, deg
-  lib_lon_amp: { value: 7.0, min: 0, max: 10, step: 0.1 },        // Earth azimuth libration amplitude, deg
-  lib_period: { value: 655, min: 100, max: 1000, step: 5 },       // hours (~27.3 days)
-  slope_max: { value: 0.45, min: 0.1, max: 2, step: 0.05 },       // steepest slope the rover climbs (rise/run)
-  land_slope_max: { value: 0.22, min: 0.05, max: 1, step: 0.01 }, // steepest safe landing slope
+  // ---- terrain & landing (the terrain and sky come from real data) ----
+  terrain_smooth: { value: 0.5, min: 0, max: 1, step: 0.05 },     // blend toward a smoothed copy of the LOLA heights (0 = raw data); on reload
+  smooth_km: { value: 0.5, min: 0.1, max: 2, step: 0.05 },        // smoothing radius, km; on reload
+  slope_max: { value: 0.6, min: 0.1, max: 2, step: 0.05 },       // steepest slope the rover climbs (rise/run)
+  land_slope_max: { value: 0.3, min: 0.05, max: 1, step: 0.01 }, // steepest safe landing slope
   land_window: { value: 24, min: 0, max: 72, step: 2 },           // landing-hour window, h
   scrub_step: { value: 2, min: 1, max: 12, step: 1 },             // landing-hour scrub step, h
   slip_hours: { value: 12, min: 0, max: 48, step: 1 },            // Mission 3 launch slip
@@ -56,7 +54,7 @@ window.CONFIG = {
   rover_speed: { value: 0.4, min: 0.05, max: 1.5, step: 0.05 },   // top speed, km per real second
   rover_accel: { value: 0.5, min: 0.05, max: 3, step: 0.05 },     // throttle, km/s²
   rover_brake: { value: 0.7, min: 0.05, max: 3, step: 0.05 },     // coasting / braking, km/s²
-  rover_grav: { value: 0.35, min: 0, max: 2, step: 0.05 },        // how much a slope pulls you back (lunar g is gentle)
+  rover_grav: { value: 0.25, min: 0, max: 2, step: 0.05 },        // how much a slope pulls you back (lunar g is gentle)
   rover_turn: { value: 75, min: 10, max: 200, step: 5 },          // steering, deg per second at speed
   rover_reverse: { value: 0.35, min: 0.1, max: 1, step: 0.05 },   // reverse top speed, share of top speed
   eye_h: { value: 0.0022, min: 0.001, max: 0.01, step: 0.0002 },  // camera height above the ground, km
@@ -77,6 +75,23 @@ window.CONFIG = {
   red_pulse: { value: 20, min: 0, max: 100, step: 5 },            // battery % where the visor edge pulses red
   subtitle_secs: { value: 6, min: 1, max: 20, step: 0.5 },        // how long a radio line stays on the visor
 
+  // ---- the mission score: KPIs, their targets and what each is worth ----
+  score_sent: { value: 1, min: 0, max: 5, step: 0.1 },            // points per science point that reached Earth
+  score_crew: { value: 60, min: 0, max: 200, step: 5 },           // crew back aboard at ascent
+  score_sun: { value: 0.4, min: 0, max: 2, step: 0.05 },          // per % of mission hours the lander's array saw the Sun
+  score_earth: { value: 0.4, min: 0, max: 2, step: 0.05 },        // per % of mission hours the dish saw Earth
+  score_batt: { value: 0.3, min: 0, max: 2, step: 0.05 },         // per % of the lowest battery reached
+  score_lost: { value: 0.5, min: 0, max: 2, step: 0.05 },         // taken off per science point left unsent
+  kpi_sent: { value: 100, min: 10, max: 400, step: 10 },          // target: science sent home per mission
+  kpi_sun: { value: 70, min: 0, max: 100, step: 5 },              // target: % of hours the lander is sunlit
+  kpi_earth: { value: 60, min: 0, max: 100, step: 5 },            // target: % of hours the dish sees Earth
+  kpi_batt: { value: 25, min: 0, max: 100, step: 5 },             // target: lowest battery, %
+  kpi_b: { value: 0.7, min: 0.3, max: 1, step: 0.05 },            // share of a target that still earns a B
+  rate_director: { value: 800, min: 100, max: 2000, step: 25 },   // campaign score for FLIGHT DIRECTOR
+  rate_planner: { value: 550, min: 100, max: 2000, step: 25 },    // ... MISSION PLANNER
+  rate_reader: { value: 300, min: 50, max: 2000, step: 25 },      // ... HORIZON READER
+  planner_cells: { value: 12, min: 1, max: 100, step: 1 },        // landable sites the debrief planner scores per frame
+
   // ---- danger and music thresholds ----
   dusk_hours: { value: 6, min: 1, max: 24, step: 0.5 },           // sunset this close turns the music to dusk
   danger_batt: { value: 30, min: 0, max: 100, step: 5 },          // battery % where the heartbeat starts
@@ -89,40 +104,38 @@ window.CONFIG = {
   walkthrough: { value: 1, min: 0, max: 1, step: 1 },              // 1: show the numbered tour in Mission 1 (H replays it)
 };
 
-// The site: a hand-shaped model of the Shackleton rim / Connecting Ridge area (illustrative).
+// The site: the southern Shackleton-Henson-de Gerlache ridge, "Connecting Ridge", one of NASA's 13 Artemis III
+// candidate landing regions (2022). Real LOLA terrain: Shackleton's centre (89.67 S, 129.78 E) sits at km
+// (-4, 8.5) and +x points toward de Gerlache crater (see assets/data/lola-site.js for the frame).
 // Units: km. Map x grows right, y grows down. Azimuth 0 = map up, 90 = map right.
 window.SITE = {
   cell_x: 0.3, cell_y: 0.5333,             // km per map cell (chars are 9x16 px)
-  shackleton: { x: -4, y: 6.5, r: 10.5, depth: 4.2, rim: 0.8 },
-  ridge: { x0: 6.5, y0: 6.5, x1: 34, y1: 2.0, h: 0.5, w: 2.6 },
-  terrace: { x: 19, y: 10.8, r: 2.6, depth: 0.6, rim: 0.25 },
-  far: [ // distant features that make the skyline
-    { name: 'MASSIF', x: 44, y: 41.5, h: 2.7, s: 7 },
-    { name: 'WEST RIM', x: -22.6, y: 20.7, h: 2.1, s: 8 },
-    { name: 'NORTH HILLS', x: 32, y: -40, h: 2.3, s: 9 },
-  ],
-  small_craters: 14,
-  noise_amp: 0.055,
-  // stations, in map cells (col 0-99, row 0-25)
-  survey: [[40, 9], [78, 7], [50, 22], [90, 21]],
-  drill: [[31, 18], [86, 13]],
-  psr_drill: [[63, 20]],
-  start_cursor: [52, 13],
+  detail_amp: 0.004,                        // km of roughness added below the data's 40 m resolution (close-up view only)
+  // stations, in map cells (col 0-99, row 0-25), placed on flat real ground
+  survey: [[80, 2], [84, 3], [66, 1], [70, 7]],      // 2-3.4 km from the start zone, each lit at different hours
+  drill: [[63, 2], [63, 6]],
+  psr_drill: [[67, 4]],                     // in a permanently shadowed hollow 2.1 km from the start zone, 330 m below it
+  start_cursor: [74, 4],                   // a ridge top lit in all three mission windows
   area: { x0: 0, y0: 0, x1: 29.7, y1: 13.3 }, // the mission area in km (the map); leave it and the 5 s countdown starts
   labels: [
-    { text: 'SHACKLETON', c: 2, r: 11 }, { text: '(never sunlit)', c: 2, r: 12 },
-    { text: 'CONNECTING RIDGE', c: 44, r: 11 },
-    { text: 'THE TERRACE', c: 58, r: 24 },
+    { text: 'SHACKLETON', c: 1, r: 17 }, { text: '(never sunlit)', c: 1, r: 18 },
+    { text: 'CONNECTING RIDGE', c: 52, r: 9 }, { text: '(Artemis III candidate)', c: 52, r: 10 },
+    { text: 'COLD TRAP (PSR)', c: 52, r: 5 },
+    { text: 'DE GERLACHE >', c: 86, r: 0 },
   ],
 };
 
-// Missions: sky phase, duration and briefing. Sun azimuth at mission hour 0, solar declination,
-// Earth libration phase (hours) and azimuth.
+// Missions: a real start date (UTC) for the sky, duration and briefing, and the difficulty, which climbs:
+// where the scout starts (an imperfect site, for the planner to teach), starting battery %, a drain multiplier
+// and the science-sent target.
 window.MISSIONS = [
-  { name: 'LEARN THE HORIZON', duration: 48, sun_az0: 120, decl: 1.35, earth_az: 250, lib_phase: 76, lib_lon_phase: 0,
-    brief: 'CAPCOM: Welcome to the south pole. Up here the Sun never climbs more than a couple of degrees, so a ridge forty kilometres away can steal it. Fly the scout and watch the SKY strip: the Sun (*) and Earth (O) slide along the real skyline. Plant a flag with F where the Sun clears the ridge, scrub the landing hour with [ and ], then ENTER to land (V shows the ground view first). On the surface you drive the rover with your commander beside you: W/S throttle, A/D steer, E to work a station. The clock runs while you drive. Survey outcrops only count in sunlight; the shadows move. Be back at the lander by departure, 48 hours, or the ascent stage leaves without the science. Stay inside the mission area.' },
-  { name: 'GET IT HOME', duration: 72, sun_az0: 175, decl: 1.0, earth_az: 250, lib_phase: 289, lib_lon_phase: 160,
-    brief: 'CAPCOM: Data on your suit is worth nothing until the dish sends it. Earth is sinking toward the west rim this week. The dish [>] only transmits while Earth clears the skyline at the lander, so higher ground keeps Earth longer. Drill sites need a 25% battery reserve. Bring the crew back to the lander by departure, 72 hours.' },
-  { name: 'THE TRADE-OFF', duration: 72, sun_az0: 112, decl: 0.7, earth_az: 250, lib_phase: 26, lib_lon_phase: 320,
-    brief: 'CAPCOM: The Terrace has not seen the Sun in two billion years. A core from its frozen floor pays two and a half times as much, but the cold drains your battery and your panels need light back at the lander. Sun is low this season. Choose your ground. Departure in 72 hours.' },
+  { name: 'LEARN THE HORIZON', start: '2027-10-17T00:00Z', duration: 48,
+    scout: [79, 2], battery: 100, drain: 1.0, kpi_sent: 60,     // starts on a half-lit spot one cell from full sun
+    brief: 'CAPCOM: Welcome to Connecting Ridge, 17 October 2027. This ground comes from NASA laser altimetry of the ridge between Shackleton and de Gerlache craters, an Artemis III candidate region, smoothed a little so the rover can drive it. The Sun and Earth follow their real 2027 paths, and the Sun never climbs more than a degree and a half, so a ridge forty kilometres away can steal it. Fly the scout and watch the SKY strip: the Sun (*) and Earth (O) slide along the real skyline. Plant a flag with F where the Sun clears the ridge, scrub the landing hour with [ and ], then ENTER to land (V shows the ground view first). On the surface you drive the rover: W/S throttle, A/D steer, E to work a station. Survey outcrops only count in sunlight; the shadows move. Be back at the lander by departure, 48 hours. Your score is graded on science sent, crew home, sunlight and Earth link at your site, and battery margin. The scout starts over a half-lit spot: better ground is close.' },
+  { name: 'GET IT HOME', start: '2027-10-21T00:00Z', duration: 72,
+    scout: [81, 2], battery: 85, drain: 1.15, kpi_sent: 100,    // full sun, but Earth sinks behind the ridge after a day
+    brief: 'CAPCOM: 21 October 2027. Data on your rover is worth nothing until the dish sends it, and this week Earth is sinking: libration is carrying it down toward the skyline. The dish [>] only transmits while Earth clears the ridge at the lander, so pick ground that keeps Earth longest. Drill sites need a 25% battery reserve. Bring the crew back to the lander by departure, 72 hours. Harder now: batteries at 85%, a hungrier rover, and the science target is 100.' },
+  { name: 'THE TRADE-OFF', start: '2027-07-26T00:00Z', duration: 72,
+    scout: [63, 1], battery: 70, drain: 1.3, kpi_sent: 140,     // a dark hollow: the light is 2-4 km away
+    brief: 'CAPCOM: 26 July 2027, southern winter: the Sun barely scrapes the horizon and most of the ridge is dark for days. Earth is high, so the link is easy; power is the problem. The cold trap in the basin has not seen the Sun in billions of years, and a core from its floor pays two and a half times as much, but the cold drains your battery and your panels need light back at the lander. Choose your ground. Hardest yet: you start over a dark hollow with 70% battery, the cold bites harder, and the target is 140. Departure in 72 hours.' },
 ];
