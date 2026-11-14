@@ -9,8 +9,9 @@ window.CONFIG = {
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
   music_volume: { value: 0.55, min: 0, max: 1, step: 0.05 }, // share of master volume for music
 
+  // ---- time on the surface: the clock runs while you drive ----
+  time_scale: { value: 0.15, min: 0.02, max: 1, step: 0.01 },     // mission hours per real second on the surface
   // ---- time costs (mission hours) ----
-  step_hours: { value: 0.5, min: 0.1, max: 2, step: 0.1 },        // one step on foot
   survey_hours: { value: 2, min: 0.5, max: 6, step: 0.5 },        // one survey at an outcrop
   drill_hours: { value: 3, min: 1, max: 8, step: 0.5 },           // one drill core
   transmit_hours: { value: 1, min: 0.5, max: 4, step: 0.5 },      // one transmit burst at the dish
@@ -22,7 +23,7 @@ window.CONFIG = {
   battery_start: { value: 100, min: 20, max: 100, step: 5 },
   drain_base: { value: 1.0, min: 0, max: 5, step: 0.1 },          // %/h always
   drain_cold: { value: 1.3, min: 0, max: 5, step: 0.1 },          // %/h extra while you stand in shadow
-  drain_step: { value: 0.25, min: 0, max: 2, step: 0.05 },        // % per step
+  drain_drive: { value: 0.7, min: 0, max: 5, step: 0.05 },        // % per km driven
   rest_factor: { value: 0.3, min: 0, max: 1, step: 0.05 },        // drain multiplier during low-power wait
   charge_rate: { value: 3.2, min: 0, max: 10, step: 0.1 },        // %/h while the Sun clears the horizon at the lander array
   survey_cost: { value: 2, min: 0, max: 10, step: 0.5 },          // % per survey
@@ -44,21 +45,44 @@ window.CONFIG = {
   lib_amp: { value: 6.5, min: 0, max: 10, step: 0.1 },            // Earth elevation libration amplitude, deg
   lib_lon_amp: { value: 7.0, min: 0, max: 10, step: 0.1 },        // Earth azimuth libration amplitude, deg
   lib_period: { value: 655, min: 100, max: 1000, step: 5 },       // hours (~27.3 days)
-  slope_max: { value: 0.6, min: 0.1, max: 2, step: 0.05 },        // steepest walkable slope (rise/run)
+  slope_max: { value: 0.45, min: 0.1, max: 2, step: 0.05 },       // steepest slope the rover climbs (rise/run)
   land_slope_max: { value: 0.22, min: 0.05, max: 1, step: 0.01 }, // steepest safe landing slope
   land_window: { value: 24, min: 0, max: 72, step: 2 },           // landing-hour window, h
   scrub_step: { value: 2, min: 1, max: 12, step: 1 },             // landing-hour scrub step, h
   slip_hours: { value: 12, min: 0, max: 48, step: 1 },            // Mission 3 launch slip
-  hold_repeat: { value: 0.16, min: 0.05, max: 0.5, step: 0.01 },  // seconds between steps while a key is held
+  hold_repeat: { value: 0.16, min: 0.05, max: 0.5, step: 0.01 },  // seconds between scout moves while a key is held
+
+  // ---- the rover (distances in km, per real second) ----
+  rover_speed: { value: 0.4, min: 0.05, max: 1.5, step: 0.05 },   // top speed, km per real second
+  rover_accel: { value: 0.5, min: 0.05, max: 3, step: 0.05 },     // throttle, km/s²
+  rover_brake: { value: 0.7, min: 0.05, max: 3, step: 0.05 },     // coasting / braking, km/s²
+  rover_grav: { value: 0.35, min: 0, max: 2, step: 0.05 },        // how much a slope pulls you back (lunar g is gentle)
+  rover_turn: { value: 75, min: 10, max: 200, step: 5 },          // steering, deg per second at speed
+  rover_reverse: { value: 0.35, min: 0.1, max: 1, step: 0.05 },   // reverse top speed, share of top speed
+  eye_h: { value: 0.0022, min: 0.001, max: 0.01, step: 0.0002 },  // camera height above the ground, km
+  cam_tilt: { value: 0.3, min: 0, max: 1, step: 0.05 },           // how much the view pitches and rolls with the rover
+  station_radius: { value: 0.22, min: 0.05, max: 1, step: 0.01 }, // how close counts as "at" a station, km
+  board_radius: { value: 0.5, min: 0.1, max: 2, step: 0.05 },     // how close to the lander counts as aboard at departure, km
+  oob_seconds: { value: 5, min: 1, max: 20, step: 0.5 },          // real seconds outside the mission area before the abort
 
   // ---- first-person visor view ----
   pov_fov: { value: 72, min: 40, max: 120, step: 2 },             // horizontal field of view, deg
   pov_deg_row: { value: 0.1, min: 0.03, max: 0.4, step: 0.01 },   // elevation deg per dot row (lower = taller relief)
-  pov_horizon: { value: 0.5, min: 0.15, max: 0.7, step: 0.01 },  // where the 0° line sits, share of the view height
-  turn_step: { value: 15, min: 5, max: 45, step: 5 },             // degrees per look-around press
-  turn_repeat: { value: 0.08, min: 0.03, max: 0.3, step: 0.01 },  // seconds between turns while held
-  sun_size: { value: 4, min: 1, max: 8, step: 0.5 },              // drawn Sun size vs true (0.5°), for readability
-  earth_size: { value: 3.5, min: 1, max: 6, step: 0.5 },            // drawn Earth size vs true (1.9°), for readability
+  pov_horizon: { value: 0.55, min: 0.15, max: 0.8, step: 0.01 },  // where the 0° line sits, share of the view height
+  turn_rate: { value: 90, min: 20, max: 360, step: 10 },          // ground view from the scout: look-around, deg per second
+  sun_size: { value: 7, min: 1, max: 12, step: 0.5 },             // drawn Sun size vs true (0.5°), for readability
+  earth_size: { value: 3.5, min: 1, max: 6, step: 0.5 },          // drawn Earth size vs true (1.9°), for readability
+  light_step: { value: 0.25, min: 0.05, max: 2, step: 0.05 },     // Sun azimuth change (deg) that re-casts the shadows
+  frost_start: { value: 45, min: 0, max: 100, step: 5 },          // battery % where frost starts creeping over the visor
+  red_pulse: { value: 20, min: 0, max: 100, step: 5 },            // battery % where the visor edge pulses red
+  subtitle_secs: { value: 6, min: 1, max: 20, step: 0.5 },        // how long a radio line stays on the visor
+
+  // ---- danger and music thresholds ----
+  dusk_hours: { value: 6, min: 1, max: 24, step: 0.5 },           // sunset this close turns the music to dusk
+  danger_batt: { value: 30, min: 0, max: 100, step: 5 },          // battery % where the heartbeat starts
+  danger_depart: { value: 8, min: 1, max: 24, step: 0.5 },        // departure this close (and you away from the lander) starts it too
+  cut_landing: { value: 10, min: 3, max: 20, step: 0.5 },         // landing cutscene, seconds
+  cut_launch: { value: 8, min: 3, max: 20, step: 0.5 },           // take-off cutscene, seconds
 };
 
 // The site: a hand-shaped model of the Shackleton rim / Connecting Ridge area (illustrative).
@@ -80,6 +104,7 @@ window.SITE = {
   drill: [[31, 18], [86, 13]],
   psr_drill: [[63, 20]],
   start_cursor: [52, 13],
+  area: { x0: 0, y0: 0, x1: 29.7, y1: 13.3 }, // the mission area in km (the map); leave it and the 5 s countdown starts
   labels: [
     { text: 'SHACKLETON', c: 2, r: 11 }, { text: '(never sunlit)', c: 2, r: 12 },
     { text: 'CONNECTING RIDGE', c: 44, r: 11 },
@@ -91,9 +116,9 @@ window.SITE = {
 // Earth libration phase (hours) and azimuth.
 window.MISSIONS = [
   { name: 'LEARN THE HORIZON', duration: 48, sun_az0: 120, decl: 1.35, earth_az: 250, lib_phase: 76, lib_lon_phase: 0,
-    brief: 'CAPCOM: Welcome to the south pole. Up here the Sun never climbs more than a couple of degrees, so a ridge forty kilometres away can steal it. Fly the scout and watch the SKY strip: the Sun (*) and Earth (O) slide along the real skyline. Plant a flag with F where the Sun clears the ridge, scrub the landing hour with [ and ], then ENTER to land (V shows the ground view from the scout first). On the surface you see through your visor: A/D to look around, W to walk the way you face. Survey outcrops [S] only count in sunlight. Departure in 48 hours.' },
+    brief: 'CAPCOM: Welcome to the south pole. Up here the Sun never climbs more than a couple of degrees, so a ridge forty kilometres away can steal it. Fly the scout and watch the SKY strip: the Sun (*) and Earth (O) slide along the real skyline. Plant a flag with F where the Sun clears the ridge, scrub the landing hour with [ and ], then ENTER to land (V shows the ground view first). On the surface you drive the rover with your commander beside you: W/S throttle, A/D steer, E to work a station. The clock runs while you drive. Survey outcrops only count in sunlight; the shadows move. Be back at the lander by departure, 48 hours, or the ascent stage leaves without the science. Stay inside the mission area.' },
   { name: 'GET IT HOME', duration: 72, sun_az0: 175, decl: 1.0, earth_az: 250, lib_phase: 289, lib_lon_phase: 160,
-    brief: 'CAPCOM: Data on your suit is worth nothing until the dish sends it. Earth is sinking toward the west rim this week. The dish [>] only transmits while Earth clears the skyline at the lander, so higher ground keeps Earth longer. Drill sites [D] need a 25% battery reserve. Departure in 72 hours.' },
+    brief: 'CAPCOM: Data on your suit is worth nothing until the dish sends it. Earth is sinking toward the west rim this week. The dish [>] only transmits while Earth clears the skyline at the lander, so higher ground keeps Earth longer. Drill sites need a 25% battery reserve. Bring the crew back to the lander by departure, 72 hours.' },
   { name: 'THE TRADE-OFF', duration: 72, sun_az0: 112, decl: 0.7, earth_az: 250, lib_phase: 26, lib_lon_phase: 320,
-    brief: 'CAPCOM: The Terrace has not seen the Sun in two billion years. A core from its frozen floor [D] pays two and a half times as much, but the cold drains your battery and your panels need light back at the lander. Sun is low this season. Choose your ground. Departure in 72 hours.' },
+    brief: 'CAPCOM: The Terrace has not seen the Sun in two billion years. A core from its frozen floor pays two and a half times as much, but the cold drains your battery and your panels need light back at the lander. Sun is low this season. Choose your ground. Departure in 72 hours.' },
 ];
