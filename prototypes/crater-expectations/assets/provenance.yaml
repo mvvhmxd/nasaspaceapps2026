@@ -20,3 +20,24 @@
   note: "the game blends these heights toward a smoothed copy at load (config terrain_smooth, smooth_km) and says so on screen"
   date: 2026-11-14
   ships: true
+- path: assets/data/validation.js
+  origin: code
+  tool: "hand-written from the cited sources; the Horizons rows came from JPL Horizons API topocentric queries (CENTER coord@301, SITE_COORD 245.699,-89.5891,0, QUANTITIES 4, APPARENT AIRLESS) run once at development time"
+  model: "claude-opus-5-5"
+  source:
+    - {vendor: "Gläser et al. 2017, NASA NTRS", product: "Illumination conditions at the lunar poles: Implications for future exploration (site illumination %, 2 m above ground)", url: "https://ntrs.nasa.gov/citations/20170007365"}
+    - {vendor: "NASA JPL Solar System Dynamics", product: "Horizons topocentric Sun and Earth az/el, 8 epochs in 2027", url: "https://ssd.jpl.nasa.gov/api/horizons.api"}
+  licence: {id: "LicenseRef-NASA-Public-Domain"}
+  note: "reference values only (published figures and query results); the game computes its own side of each comparison live"
+  date: 2026-11-14
+  ships: true
+- path: assets/data/voice.js
+  origin: generated
+  tool: "tools/voice/bake.js (manifest, pack) + tools/voice/synth.ps1 (Windows.Media.SpeechSynthesis OneCore voices, offline) + tools/voice/radio.sh (ffmpeg: band-pass 380-2800 Hz, compression, soft clip, light bitcrush, pink-noise hiss, 32 kbps mono mp3)"
+  model: "claude-opus-5-5 (wrote the lines and the bake scripts)"
+  source:
+    - {vendor: "Microsoft", product: "Windows OneCore speech voices Microsoft Mark, David and Zira (en-US), synthesized locally on the developer's PC", url: "https://learn.microsoft.com/uwp/api/windows.media.speechsynthesis"}
+  licence: {id: "LicenseRef-Microsoft-Windows-TTS-Output", note: "synthetic speech generated with the OS's built-in voices; check the Windows licence terms before any commercial release"}
+  note: "32 radio lines keyed by their exact subtitle text; re-run the bake whenever a CAPCOM/CDR/LMP line changes. Synthetic voices: real teammates recorded through radio.sh would sound more human"
+  date: 2026-11-14
+  ships: true

@@ -9,6 +9,12 @@ window.CONFIG = {
   seed: 1, // every gameplay random call reads rng(), seeded from this (or ?seed= in the address)
   volume: { value: 0.5, min: 0, max: 1, step: 0.05 },
   music_volume: { value: 0.55, min: 0, max: 1, step: 0.05 }, // share of master volume for music
+  voice: { value: 1, min: 0, max: 1, step: 1 },                     // 1: CAPCOM, CDR and LMP speak their radio lines (baked clips, assets/data/voice.js)
+  voice_volume: { value: 0.8, min: 0, max: 1, step: 0.05 },        // speech loudness, share of master volume
+  voice_static: { value: 0.05, min: 0, max: 0.3, step: 0.01 },     // open-channel hiss under a call
+  voice_backlog: { value: 3, min: 1, max: 8, step: 1 },              // calls waiting before the oldest drop to text only
+  launch_confirm: { value: 8, min: 2, max: 20, step: 1 },         // s: after the first ENTER at the lander, how long a second ENTER launches
+  voice_crackle: { value: 6, min: 0, max: 30, step: 1 },           // crackle pops per second while a call is open
 
   // ---- time on the surface: the clock runs while you drive ----
   time_scale: { value: 0.15, min: 0.02, max: 1, step: 0.01 },     // mission hours per real second on the surface
@@ -49,6 +55,9 @@ window.CONFIG = {
   scrub_step: { value: 2, min: 1, max: 12, step: 1 },             // landing-hour scrub step, h
   slip_hours: { value: 12, min: 0, max: 48, step: 1 },            // Mission 3 launch slip
   hold_repeat: { value: 0.16, min: 0.05, max: 0.5, step: 0.01 },  // seconds between scout moves while a key is held
+  // ---- planner mode ----
+  plan_lapse: { value: 12, min: 1, max: 96, step: 1 },             // time-lapse speed, hours of sky per second
+  plan_heat_ms: { value: 6, min: 1, max: 30, step: 1 },            // heat-map work per frame, ms
 
   // ---- the rover (distances in km, per real second) ----
   rover_speed: { value: 0.4, min: 0.05, max: 1.5, step: 0.05 },   // top speed, km per real second
@@ -61,7 +70,7 @@ window.CONFIG = {
   cam_tilt: { value: 0.3, min: 0, max: 1, step: 0.05 },           // how much the view pitches and rolls with the rover
   station_radius: { value: 0.22, min: 0.05, max: 1, step: 0.01 }, // how close counts as "at" a station, km
   board_radius: { value: 0.5, min: 0.1, max: 2, step: 0.05 },     // how close to the lander counts as aboard at departure, km
-  oob_seconds: { value: 5, min: 1, max: 20, step: 0.5 },          // real seconds outside the mission area before the abort
+  oob_seconds: { value: 10, min: 1, max: 20, step: 0.5 },          // real seconds outside the mission area before the abort
 
   // ---- first-person visor view ----
   pov_fov: { value: 72, min: 40, max: 120, step: 2 },             // horizontal field of view, deg
@@ -100,6 +109,8 @@ window.CONFIG = {
   cut_launch: { value: 8, min: 3, max: 20, step: 0.5 },           // take-off cutscene, seconds
   cut_cam_dist: { value: 0.3, min: 0.05, max: 0.6, step: 0.01 }, // cutscene camera distance from the lander, km
   cut_alt: { value: 0.45, min: 0.1, max: 2, step: 0.05 },          // lander altitude when the descent shot opens, km
+  obj_scale: { value: 2.5, min: 1, max: 6, step: 0.25 },          // stations, dish, array and lander drawn this much bigger in the visor, for readability
+  obj_min_rows: { value: 7, min: 3, max: 20, step: 1 },            // smallest height (dot rows) a station is drawn at, however far
   cut_scale: { value: 7, min: 1, max: 8, step: 0.25 },          // how much bigger the lander is drawn in cutscenes, for readability
   walkthrough: { value: 1, min: 0, max: 1, step: 1 },              // 1: show the numbered tour in Mission 1 (H replays it)
 };
@@ -139,3 +150,17 @@ window.MISSIONS = [
     scout: [63, 1], battery: 70, drain: 1.3, kpi_sent: 140,     // a dark hollow: the light is 2-4 km away
     brief: 'CAPCOM: 26 July 2027, southern winter: the Sun barely scrapes the horizon and most of the ridge is dark for days. Earth is high, so the link is easy; power is the problem. The cold trap in the basin has not seen the Sun in billions of years, and a core from its floor pays two and a half times as much, but the cold drains your battery and your panels need light back at the lander. Choose your ground. Hardest yet: you start over a dark hollow with 70% battery, the cold bites harder, and the target is 140. Departure in 72 hours.' },
 ];
+
+// Planner Mode (P on the title): the default date, the window lengths Y cycles through (h), the slip-test
+// offsets (h), and landmarks added to the published sites N cycles through ([column, row] map cells).
+window.PLANNER = {
+  start: '2027-10-17T00:00Z',
+  windows: [24, 72, 168, 354, 708],
+  slips: [0, 24, 72, 168],
+  extra_sites: [
+    { name: 'MISSION 1 SCOUT START', tag: 'M1', cell: [79, 2] },
+    { name: 'COLD TRAP DRILL (PERMANENT SHADOW)', tag: 'PSR', cell: [67, 4] },
+  ],
+  map_note: 'The baked map covers 30 x 14 km around 89.3-89.8°S on the connecting ridge.',
+};
+

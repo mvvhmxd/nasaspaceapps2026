@@ -1,46 +1,73 @@
-time	2026-11-14 00:09:52
-keep	lines	0	pinned	0
-briefword	2D	unlisted
-briefword	top-down	unlisted
-briefword	first-person	unlisted
-briefword	yours	unlisted
-checklist	L1	unlisted	-	Look: everything ASCII on a canvas character grid in one crisp monospace font. Terrain shaded with a long character-density ramp, hillshaded by the current sun azimuth/elevation, with long real cast shadows at low sun; pitch-black shadowed crater with faint blue `·` frost. Limited palette: 5–6 greys for regolith, amber/white for the Sun and lit faces, blue/white Earth, phosphor-green UI, black star field, subtle CRT glow and scanlines. Box-drawing borders, gauges as `[████░░]`, hand-made ASCII title logo. Signature detail: a detailed ASCII Earth disc showing its phase hanging over the skyline strip, and sun glare streaks when the Sun clips a ridge. Animated dish and panels tracking Earth and Sun, footprints, landing dust, transmit pulse. Every figure drawn in characters: no images, no emoji, no plain circles.	
-checklist	L2	unlisted	-	References: the real lunar south pole (Shackleton rim, Connecting Ridge, the low sun) *(guessed)*; classic roguelike ASCII readability *(guessed)*.	
-checklist	L3	unlisted	-	View: 2D · Camera: top-down map, with a 360° skyline panorama strip above it.	
-checklist	F1	unlisted	-	Orbit scout: ASCII map of the site, a live 360° skyline from the scout's position, up to 3 flags with each site's sunlit % and Earth visibility, time scrub to preview the sky, then land.	
-checklist	F2	unlisted	-	Horizon sky model: placeholder Sun and Earth tracks (low Sun circling, Earth wobbling) occluded by the heightmap horizon; instrument bar with sun elevation, time to sunset/Earthset, Earth visibility.	
-checklist	F3	unlisted	-	Turn-based surface: steps and work cost mission time; five stations: hab, solar array (low-power wait), survey (needs Sun), drill (needs battery reserve, pays more in the shadowed crater), dish (needs Earth); battery drains in the dark and cold.	
-checklist	F4	unlisted	-	Three short missions: learn the horizon, get science home, the trade-off; Mission 3's 12-hour launch slip sends you back to orbit to re-pick or hold; radio messages from mission control.	
-checklist	F5	unlisted	-	ASCII art pass: hillshade, cast shadows, crater frost, phased Earth disc, sun glare, animated dish and panels, footprints, landing dust, transmit pulse, CRT glow, ASCII title, HUD and end screens.	
-checklist	F6	unlisted	-	Synthesized sound and generative music that follow the sky (warm in Sun, cold in shadow, home layer while Earth is visible, tension near set); mute toggle.	
-checklist	S1	unlisted	-	scouting from orbit with flags and time-warp · in the slice	
-checklist	S2	unlisted	-	360° skyline and horizon occlusion of the Sun and Earth · in the slice	
-checklist	S3	unlisted	-	power and battery · in the slice	
-checklist	S4	unlisted	-	science: survey, drill, transmit · in the slice	
-checklist	S5	unlisted	-	three missions and the 12-hour launch slip · in the slice	
-checklist	S6	unlisted	-	generative music and synthesized sound · in the slice	
-checklist	M1	unlisted	-	The title logo types itself in with typewriter clicks and radio static.	
-checklist	M2	unlisted	-	Mission 1 opens in orbit over the site: the skyline strip shows the Sun sitting just above a ridge, and the hint reads "Move the scout.	
-checklist	M3	unlisted	-	Watch the sky."	
-checklist	M4	unlisted	-	Moving one way, the Sun sinks behind a ridge and the map's shadows swing; the other way, it clears.	
-checklist	M5	unlisted	-	The player plants a flag where the Sun is clear and presses Enter.	
-checklist	M6	unlisted	-	Landing dust, a thump, the hab appears.	
-checklist	M7	unlisted	-	They step to the survey station and press E: science ticks up while the instrument bar shows SUN VISIBLE.	
-checklist	M8	unlisted	-	A few turns later the Sun's track nears a ridge shoulder, the bar turns amber, "SUNSET 6h", and the music thins and turns cold.	
-checklist	M9	unlisted	-	The ridge, not the clock, is what ends the day.	
-checklist	C1	unlisted	-	Mission 1 is gentle: one sunset around minute 3, and enough battery to wait it out at the array.	
-checklist	C2	unlisted	-	Mission 2 adds Earthset: science you collected but have not transmitted is worth nothing until you send it before Earth slips behind the ridge.	
-checklist	C3	unlisted	-	Mission 3 is the full trade-off: the shadowed terrace pays most but drains the battery in the cold, and a 12-hour launch slip moves the whole sky.	
-checklist	C4	unlisted	-	If the battery hits zero, the mission ends early and you keep only what was transmitted.	
-checklist	C5	unlisted	-	Each mission ends at its departure time.	
-checklist	C6	unlisted	-	*(provisional, from "in between")*	
+time	2026-11-14 03:44:54
+keep	lines	3	pinned	1
+keep	1	same	music_volume	0.55	0.55
+keep	2	unpinned	the moon terrain interacting with map movement: the skyline and shadows change as you move *(you said)*
+keep	3	unpinned	the info and guide text boxes (briefings, radio, instrument bar) *(you said)*
+briefword	2D	shown	evidence/surface.png
+briefword	top-down	shown	evidence/surface.png
+briefword	first-person	missed	the raymarched first-person look mode is optional and later (Out of scope)
+briefword	3d	unlisted
+briefword	a pov	unlisted
+briefword	they are not	unlisted
+briefword	danger music sun	unlisted
+briefword	yours	missed	not a look word (from the Question line)
+checklist	L1	pass	evidence/surface.png	Look: everything ASCII on a canvas character grid in one crisp monospace font. Terrain shaded with a long character-density ramp, hillshaded by the current sun azimuth/elevation, with long real cast shadows at low sun; pitch-black shadowed crater with faint blue `·` frost. Limited palette: 5–6 greys for regolith, amber/white for the Sun and lit faces, blue/white Earth, phosphor-green UI, black star field, subtle CRT glow and scanlines. Box-drawing borders, gauges as `[████░░]`, hand-made ASCII title logo. Signature detail: a detailed ASCII Earth disc showing its phase hanging over the skyline strip, and sun glare streaks when the Sun clips a ridge. Animated dish and panels tracking Earth and Sun, footprints, landing dust, transmit pulse. Every figure drawn in characters: no images, no emoji, no plain circles.	character grid, density ramp, hillshade and cast shadows, black PSR with blue frost, palette, CRT glow, boxed HUD, block-letter title (evidence/title.png), lander dish and panels drawn
+checklist	L2	pass	evidence/surface.png	Data (after play): terrain from NASA LRO LOLA (smoothed for play, said on screen) and JPL Horizons Sun/Earth, credited on the title and the debrief; rover, power and score numbers stay a game model.	Shackleton (never sunlit), Connecting Ridge and The Terrace labelled on a hand-shaped site
+checklist	L3	pass	evidence/surface.png	References: the real lunar south pole (Shackleton rim, Connecting Ridge, the low sun) *(guessed)*; classic roguelike ASCII readability *(guessed)*.	2D top-down map with the 360° skyline strip above it
+checklist	L4	unlisted	-	Dot-matrix detail (after play): terrain, Sun and Earth drawn as a dense grid of dots (. · ∙ • ●), 8 per text cell, whose size and colour carry the light, in the manner of ascii.rest's dot pieces, generated by the game's own renderer (no art copied, nothing loaded from the web). Text stays on the readable grid. Sun: a limb-darkened dot disc with a corona and rays; Earth: a phased dot disc with oceans, land and cloud; shadowed ground faintly earthlit blue.	
+checklist	L5	unlisted	-	In-world HUD (after play): the visor fills the screen; SUNSET/EARTHSET clocks hang under the Sun and Earth on the horizon (edge arrows when off-screen); battery shows as frost creeping over the visor and a red edge pulse; radio lines fade in as subtitles; one objective line with a ◆ marker in the world; a slim dashboard on the rover's cowl. The map, status and radio boxes stay visible beside it, slimmer; the 360° strip, big map and Earth panel come up on Tab. Leaving the mission area turns the sky to red static with a big countdown.	
+checklist	L6	unlisted	-	Assets (after play): dot-matrix sprites for the lander, solar array, dish, survey beacons, drill rigs and flags, sized by distance and hidden by nearer ground; the rover's cowl, fenders and antenna in view, riding the suspension; ridge outlines and earthshine contour lines so shapes read in the dark; a bigger Sun (sun_size). Iteration 3: more detailed sprites (beacon with sensor head, lens and blinking light on a tripod; lander with gold foil, windows and legs; drill rigs, dish, panels, rover), and cutscenes filmed from outside so you see the lander come down and the ascent stage leave.	
+checklist	L7	unlisted	-	View: 3D first person on the surface, top-down map in orbit · Camera: a ray-marched visor view (vertical ×3 exaggeration, marked on screen) with a minimap, a 360° skyline strip above; in orbit a top-down map with a ground view on V.	
+checklist	F1	pass	evidence/orbit.png	Orbit scout: ASCII map of the site, a live 360° skyline from the scout's position, up to 3 flags with each site's sunlit % and Earth visibility, time scrub to preview the sky, then land.	scout reticle, live skyline from the scout, flags with sun/earth % and timelines (index.html composePanel), [ ] scrub, ENTER lands (evidence/surface.png)
+checklist	F2	pass	evidence/surface.png	Horizon sky model: real Sun and Earth tracks (Horizons, after play) (low Sun circling, Earth wobbling) occluded by the heightmap horizon; instrument bar with sun elevation, time to sunset/Earthset, Earth visibility.	Sun and Earth tracks occluded by the ray-marched horizon; bar shows sun elevation, clearance, sunset/sunrise and Earthset times
+checklist	F3	pass	index.html:579	Turn-based surface: steps and work cost mission time; five stations: hab, solar array (low-power wait), survey (needs Sun), drill (needs battery reserve, pays more in the shadowed crater), dish (needs Earth); battery drains in the dark and cold.	turn-based steps and work cost hours; hab, array, survey, drill, PSR drill, dish; drain in shadow; surface.png shows it running
+checklist	F4	pass	config.js:83	Three short missions: learn the horizon, get science home, the trade-off; Mission 3's 12-hour launch slip sends you back to orbit to re-pick or hold; radio messages from mission control.	three missions with briefings; Mission 3 slip in land(); radio panel in surface.png
+checklist	F5	pass	evidence/surface.png	ASCII art pass: hillshade, cast shadows, crater frost, phased Earth disc, sun glare, animated dish and panels, footprints, landing dust, transmit pulse, CRT glow, ASCII title, HUD and end screens.	hillshade, shadows, frost, phased Earth disc, glare (orbit.png), footprints, lander; dust and transmit pulse in code (land, composePlay)
+checklist	F6	not_assessed	index.html:musicUpdate	First-person visor (after play): a ray-marched dot-matrix view of the heightfield with real cast shadows, the Sun and Earth cut by the ridge, stations and lander with distances, compass, minimap; ground view from the scout in orbit; denser dot-matrix map, skyline strip and Earth.	synth sound and generative music are built (warm, cold, home, tension layers; mute on M) but cannot be heard by the check
+checklist	F7	unlisted	-	Synthesized sound and generative music that follow the sky (warm in Sun, cold in shadow, home layer while Earth is visible, tension near set); mute toggle. After play: dusk music as the Sun nears the ridge, a hollow no-Earth/no-comms layer, a link-back cue, a heartbeat danger layer for low battery and a late ascent, an out-of-bounds alarm, rover motor, gravel and steering sounds, and landing/launch themes.	
+checklist	F8	unlisted	-	The rover and the running clock (after play): drive the surface in real time with smooth physics (throttle, steering, slopes that slow you and stop you when too steep, suspension bumps, pitch and roll); landing and ascent cutscenes with NASA-style comms (Quindar tones); the HUD moved into the world; the out-of-bounds countdown.	
+checklist	F9	unlisted	-	Real NASA data (after play): the site is Connecting Ridge (an Artemis III candidate region) from LRO LOLA laser altimetry (40 m and 240 m polar DEMs), with lunar curvature; the Sun and Earth follow JPL Horizons positions for each mission's real 2027 date; permanently shadowed cells come from a whole year of real Sun positions. Baked into one offline file. After play: the heights are blended halfway toward a 0.5 km smoothed copy so the rover can drive it (terrain_smooth, 0 = raw data), and the credits say so; the stations sit within about 3.5 km of a ridge-top start zone, with a real shadowed hollow for the cold-trap drill.	
+checklist	F10	unlisted	-	KPI score and site debrief (after play): each mission is graded A-F on six KPIs (science sent, crew home, lander sunlit %, dish Earth %, lowest battery, science left unsent) against targets, with points, a big mission score, the campaign total and a rating; the debrief compares your landing site's Sun/Earth timeline with the planner's pick among about 1000 landable sites and says why it is better.	
+checklist	F11	unlisted	-	Numbered walkthrough (after play): on the first mission, 7 steps in orbit and 6 after touchdown light one part of the screen at a time and explain the controls, what the live numbers mean and what makes a good landing site; H shows it again.	
+checklist	F12	unlisted	-	Planner Mode and Validation (after play, for the Lunar Landing Site Navigator challenge): P on the title opens a planner on any hour of 2027 (hour, day and week steps, window 24 h to 708 h, time-lapse), named published sites, typed latitude/longitude limited to the baked map, up to 3 sites compared with Sun %, Earth %, Sun clearance and next sunset/Earthset, a slip test (+1 d, +3 d, +7 d) and a best-sites heat map; V opens a validation screen that recomputes sunlight at 4 published sites (Gläser et al. 2017), Sun and Earth elevations against independent JPL Horizons topocentric queries, and the Shackleton floor shadow check, with method and limits.	
+checklist	S1	pass	evidence/orbit.png	scouting from orbit with flags and time-warp · in the slice	orbit scouting, flags and landing-hour scrub
+checklist	S2	pass	evidence/surface.png	360° skyline and horizon occlusion of the Sun and Earth · in the slice	skyline occlusion: sun(hidden) behind ridge, Earth in view
+checklist	S3	pass	evidence/surface.png	power and battery · in the slice	battery gauge, charge from lit array, cold drain in shadow
+checklist	S4	pass	index.html:579	science: survey, drill, transmit · in the slice	survey needs sun, drill needs reserve and pays more in PSR, transmit needs Earth
+checklist	S5	pass	index.html:456	three missions and the 12-hour launch slip · in the slice	three missions; Mission 3 slip sends you back to orbit
+checklist	S6	not_assessed	index.html:audioInit	generative music and synthesized sound · in the slice	built with Web Audio; sound cannot be checked by a screenshot
+checklist	S7	unlisted	-	raymarched ASCII first-person visor view · in the slice	
+checklist	S8	unlisted	-	rover driving physics and the real-time mission clock · in the slice	
+checklist	S9	unlisted	-	landing and ascent cutscenes with radio comms · in the slice	
+checklist	S10	unlisted	-	in-world HUD and mission-area bounds · in the slice	
+checklist	S11	unlisted	-	numbered walkthrough · in the slice	
+checklist	S12	unlisted	-	real LOLA terrain and JPL Horizons ephemeris · in the slice	
+checklist	S13	unlisted	-	KPI score and site debrief with the planner's pick · in the slice	
+checklist	M1	pass	evidence/title.png	The title logo types itself in with typewriter clicks and radio static.	logo reveals left to right with typewriter clicks
+checklist	M2	pass	evidence/orbit.png	Mission 1 opens in orbit over the site: the skyline strip shows the Sun sitting just above a ridge, and the hint reads "Move the scout.	Mission 1 opens in orbit with the Sun just above a ridge (findStart) and a briefing to move the scout and watch the sky
+checklist	M3	pass	config.js:83	Watch the sky."	briefing tells the player to watch the SKY strip
+checklist	M4	pass	evidence/orbit.png	Moving one way, the Sun sinks behind a ridge and the map's shadows swing; the other way, it clears.	moving the scout changes the skyline (orbit.png vs surface.png: sun clear vs hidden)
+checklist	M5	pass	index.html:973	The player plants a flag where the Sun is clear and presses Enter.	F plants a flag, ENTER lands
+checklist	M6	pass	evidence/surface.png	Landing dust, a thump, the hab appears.	lander drawn after touchdown; dust and thump in land()
+checklist	M7	pass	index.html:579	They step to the survey station and press E: science ticks up while the instrument bar shows SUN VISIBLE.	E at [S] adds science while the Sun is visible; bar hint shows [E] SURVEY
+checklist	M8	pass	index.html:829	A few turns later the Sun's track nears a ridge shoulder, the bar turns amber, "SUNSET 6h", and the music thins and turns cold.	sunset time turns red under 6h, music switches to cold layer and tension
+checklist	M9	pass	evidence/surface.png	The ridge, not the clock, is what ends the day.	the ridge hides the Sun while it is still up (+1.64° but hidden)
+checklist	C1	not_assessed	config.js:1	Difficulty climbs (after play): each mission starts the scout over a deliberately imperfect real site (M1 half-lit, M2 losing Earth after a day, M3 a dark hollow), with less battery (100/85/70%), a hungrier rover (drain x1.0/1.15/1.3) and a higher science target (60/100/140).	Mission 1 sunset time depends on the site picked; not timed by the check
+checklist	C2	pass	index.html:558	Mission 1 is gentle: one sunset around minute 3, and enough battery to wait it out at the array.	unsent suit data is reported as lost at departure; Mission 2 Earth libration sinks Earth
+checklist	C3	pass	config.js:1	Mission 2 adds Earthset: science you collected but have not transmitted is worth nothing until you send it before Earth slips behind the ridge.	psr_drill_mult 2.5, cold drain, 12h slip in Mission 3
+checklist	C4	pass	index.html:530	Mission 3 is the full trade-off: the shadowed terrace pays most but drains the battery in the cold, and a 12-hour launch slip moves the whole sky.	battery at 0 ends the mission early, keeping only what was sent
+checklist	C5	pass	index.html:530	If the battery hits zero, the mission ends early and you keep only what was transmitted.	mission ends at departure time
+checklist	C6	not_assessed	-	Each mission ends at its departure time.	a provenance note, not a game line
+checklist	C7	unlisted	-	*(provisional, from "in between")*	
 browser	HeadlessChrome/157.0.0.0
 scene	play	0	title
-scene	play	1	play
+scene	play	1	planner
+scene	play	223	title
+scene	play	257	validate
 digits	log	15px "DejaVu Sans Mono", Consolas, "Courier New", monospace	tabular	0
-measure	step-time	play	1.260	123.300	206
-lane	play	stop	3.4	880
+measure	step-time	play	1.816	608.500	410
+lane	play	stop	6.8	1227
 uncaught	play	0
 screen	play	drawn
 shot	play	prototypes/crater-expectations/evidence/play.png
-responds	changed	4
+not_assessed	responds	no key reached the play scene: start --keys with what leaves the title

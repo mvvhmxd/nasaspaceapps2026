@@ -17,6 +17,8 @@
 <canvas id="game"></canvas>
 <script src="config.js"></script>
 <script src="assets/data/lola-site.js"></script>
+<script src="assets/data/validation.js"></script>
+<script src="assets/data/voice.js"></script>
 <script>
 'use strict';
 // Crater Expectations: an ASCII lunar south-pole mission sim.
@@ -246,11 +248,12 @@ const C = {
 };
 
 // ---- Input ------------------------------------------------------------------------------
-const down = new Set(), hit = new Set();
+const down = new Set(), hit = new Set(), typed = [];
 const pressed = code => hit.has(code);
 addEventListener('keydown', e => {
   startAudio();
   if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  typed.push(e.key.length === 1 ? e.key : ({ Period: '.', NumpadDecimal: '.', Minus: '-', Comma: ',', Space: ' ' })[e.code] || (/^(Digit|Numpad)[0-9]$/.test(e.code) ? e.code.slice(-1) : e.key));
   if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
 });
 addEventListener('keyup', e => down.delete(e.code));
@@ -296,7 +299,7 @@ function startAudio() {
   }
   if (audio.ac.state === 'suspended' && audio.ac.resume) audio.ac.resume();
 }
-function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; if (m) voiceStop(); }
 addEventListener('tune', () => setMuted(muted));
 function audioInit() {
   const ac = audio.ac;
@@ -344,7 +347,9 @@ function audioInit() {
   // descent and ascent engines: a deep rumble felt through the cabin
   const engG = ac.createGain(); engG.gain.value = 0; engG.connect(audio.out);
   const engLp = loopNoise('lowpass', 160, 0.7, 1, engG);
-  music = { warm, cold, home, tens, dusk, dlp, duskOsc, hollow, cue, bus, delay: send, motorG, mlp, m1, m2, gravelG, gravel, whineG, whine, engG, engLp,
+  const hissG = ac.createGain(); hissG.gain.value = 0; hissG.connect(audio.out);
+  loopNoise('bandpass', 2300, 0.7, 1, hissG); loopNoise('highpass', 5200, 0.5, 0.35, hissG);
+  music = { hissG, warm, cold, home, tens, dusk, dlp, duskOsc, hollow, cue, bus, delay: send, motorG, mlp, m1, m2, gravelG, gravel, whineG, whine, engG, engLp,
     nextPing: 0, nextNote: 0, nextBreath: 0, nextHeart: 0, nextAlarm: 0, nextDusk: 0, note: 2, last: 0 };
 }
 function env(g, t, a, peak, rel) { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + rel); }
@@ -378,6 +383,10 @@ const sfx = {
   /** Quindar tones: the NASA keying beeps that open (2525 Hz) and close (2475 Hz) a CAPCOM call. */
   quindar(open = true) { if (!this.ok()) return; osc('sine', open ? 2525 : 2475, audio.ac.currentTime + (open ? 0 : 0.05), 0.004, 0.07, 0.25); },
   /** Earth is back: the home melody returns with a rising chirp. */
+  /** Walkie-talkie: the key-up click before a call, and the squelch tail ("kssht") when it ends. */
+  keyup() { if (!this.ok()) return; const t = audio.ac.currentTime; noise(t, 0.03, 'highpass', 2500, 0.1); osc('square', 1900, t, 0.002, 0.025, 0.03); },
+  squelch() { if (!this.ok()) return; const t = audio.ac.currentTime; noise(t, 0.22, 'highpass', 1600, 0.16, 0.7, 0.004); noise(t + 0.02, 0.12, 'bandpass', 3400, 0.06, 1.5); },
+  crackle() { if (!this.ok()) return; noise(audio.ac.currentTime, 0.015 + arand() * 0.04, 'bandpass', 1500 + arand() * 3000, 0.05 + arand() * 0.08, 1.2); },
   link() { if (!this.ok()) return; const t = audio.ac.currentTime; [587.33, 739.99, 880, 1174.66].forEach((f, i) => osc('triangle', f, t + i * 0.11, 0.01, 0.12, 0.6, music.cue)); this.telemetry(); },
 };
 const PENTA = [293.66, 329.63, 369.99, 440, 493.88, 587.33, 659.25];
@@ -500,9 +509,8 @@ function boxBlur(a, nx, ny, r) {
   return o;
 }
 /** A LOLA grid in km, eased for play: blended toward a smoothed copy by tune.terrain_smooth (0 = the raw data). */
-function lolaGrid(g) {
+function lolaGrid(g, s = tune.terrain_smooth) {
   const a = b64i16(g.b64), f = new Float32Array(a.length); for (let i = 0; i < a.length; i++) f[i] = a[i] / 1000;
-  const s = tune.terrain_smooth;
   if (s > 0) { const r = Math.max(1, Math.round(tune.smooth_km / g.q)), b = boxBlur(boxBlur(f, g.nx, g.ny, r), g.nx, g.ny, r); for (let i = 0; i < f.length; i++) f[i] += (b[i] - f[i]) * s; }
   return { x0: g.x0, y0: g.y0, q: g.q, nx: g.nx, ny: g.ny, a: f };
 }
@@ -514,6 +522,19 @@ function terrain(x, y) {
   if (z !== z) z = sampleGrid(LC, Math.max(LC.x0, Math.min(LC.x0 + (LC.nx - 1.01) * LC.q, x)), Math.max(LC.y0, Math.min(LC.y0 + (LC.ny - 1.01) * LC.q, y)));
   return z;
 }
+// Game frame <-> latitude/longitude (polar stereographic, the frame the terrain was baked in).
+const GEO = (() => {
+  const st = (lat, lon) => { const k = 2 * MOON_R * Math.tan(Math.PI / 4 + lat * D2R / 2); return { X: k * Math.sin(lon * D2R), Y: k * Math.cos(lon * D2R) }; };
+  const F = LOLA.frame, s0 = st(F.shackleton[0], F.shackleton[1]), th = F.heading_deg * D2R, ux = Math.cos(th), uy = Math.sin(th), vx = uy, vy = -ux;
+  return {
+    /** Game km of a latitude/longitude (deg, south negative, east positive). */
+    toGame(lat, lon) { const p = st(lat, lon), dX = p.X - s0.X, dY = p.Y - s0.Y; return { x: F.at[0] + dX * ux + dY * uy, y: F.at[1] + dX * vx + dY * vy }; },
+    /** Latitude/longitude of game km (x, y). */
+    toLatLon(x, y) { const a = x - F.at[0], b = y - F.at[1], X = s0.X + a * ux + b * vx, Y = s0.Y + a * uy + b * vy;
+      return { lat: -90 + 2 * Math.atan(Math.hypot(X, Y) / (2 * MOON_R)) * R2D, lon: (Math.atan2(X, Y) * R2D + 360) % 360 }; },
+  };
+})();
+const fmtLL = ll => `${Math.abs(ll.lat).toFixed(3)}°S ${ll.lon.toFixed(2)}°E`;
 /** Real height plus a little roughness below the data's resolution, for the close-up view. */
 function height(x, y) { return terrain(x, y) + SITE.detail_amp * (vnoise(x / 0.45, y / 0.45) * 2 - 1); }
 // ---- Sky: real Sun and Earth from JPL Horizons, hourly through 2027, as seen from the map centre ----------
@@ -546,7 +567,9 @@ function hgt(x, y) {
   if (v !== v) v = sampleGrid(HGC, x, y);
   return v !== v ? height(x, y) : v;
 }
-const DISTS = []; for (let d = 0.15; d < 95; d *= 1.09) DISTS.push(d);
+const DISTS = []; for (let d = 0.15; d < 140; d *= 1.09) DISTS.push(d);
+/** Height (km) for skyline tracing: the LOLA grids only, NaN past their edge (so the ray simply ends there). */
+function skyH(x, y) { const z = sampleGrid(LF, x, y); return z === z ? z : sampleGrid(LC, x, y); }
 const CURV = DISTS.map(d => d * d / (2 * MOON_R));
 const HM = new Float32Array(MC * MR);
 for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) HM[r * MC + c] = terrain(c * SITE.cell_x, r * SITE.cell_y);
@@ -563,7 +586,7 @@ function profile(c, r) {
     const az = (a + 0.5) * 360 / NAZ * D2R, sx = Math.sin(az), sy = -Math.cos(az);
     let m = -1;
     for (let k = 0; k < DISTS.length; k++) {
-      const d = DISTS[k], s = (terrain(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d;
+      const d = DISTS[k], s = (skyH(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d;
       if (s > m) m = s;
     }
     p[a] = Math.atan(m) * R2D - tiltAt(x0, y0, sx, sy) * R2D;
@@ -589,7 +612,7 @@ for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) {
     const sunMax = Math.tan(Math.max(SUNMAX[a], SUNMAX[(a + 35) % 36], SUNMAX[(a + 1) % 36]) * D2R) + tiltAt(x0, y0, sx, sy);
     let blocked = 0;
     for (let k = 0; k < DISTS.length; k += 2) {
-      const d = DISTS[k]; if ((terrain(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d > sunMax) { blocked = 1; break; }
+      const d = DISTS[k]; if ((skyH(x0 + sx * d, y0 + sy * d) - CURV[k] - h0) / d > sunMax) { blocked = 1; break; }
     }
     if (!blocked) psr = 0;
   }
@@ -597,7 +620,7 @@ for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) {
 }
 
 // ---- Sky: each mission starts at a real date; hour t of the mission reads the ephemeris ------------------
-function mission(mi) { return MISSIONS[mi === undefined ? state.mi : mi]; }
+function mission(mi) { if (mi === undefined && state && state.mode === 'planner') return state.pl.m; return MISSIONS[mi === undefined ? state.mi : mi]; }
 /** Hours from the start of the ephemeris table to mission hour 0. */
 function missionHour(mi) { return (Date.parse(mission(mi).start) - EPH.t0) / 3600e3; }
 /** Sun azimuth/elevation at mission hour t (JPL Horizons, seen from the map centre). */
@@ -773,17 +796,71 @@ function startMission(mi, keepScores = true) {
   updateSky();
   radio('CAPCOM: Scout is in orbit over the south pole. Sky strip is live.', C.ui);
 }
-/** A radio call: typed into the RADIO box and onto the visor as a subtitle. CAPCOM calls open with a Quindar tone. */
+// ---- Spoken radio: baked clips (assets/data/voice.js), one call at a time on one channel ----
+// A CAPCOM / CDR / LMP line with a clip waits its turn; its subtitle appears when its audio starts and types
+// at the clip's pace, so the words on screen are the words you hear. Other lines (ARRAY:, DISH:, ...) are text only.
+const voice = { q: [], cur: null, buf: {}, busyUntil: 0, on: false, loading: false, clock: 0 };
+/** Decodes the baked clips once the audio context exists (lines show as text until they are ready). */
+function voiceLoad() {
+  if (voice.loading || !sfx.ok() || !window.VOICE_CLIPS) return; voice.loading = true;
+  for (const [text, b64] of Object.entries(VOICE_CLIPS)) {
+    const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    try { audio.ac.decodeAudioData(u.buffer, buf => { voice.buf[text] = buf; }, () => {}); } catch (e) { /* undecodable clip: stays text */ }
+  }
+}
+function voiceHiss(on) {
+  voice.on = on;
+  if (!sfx.ok()) return;
+  const g = music.hissG.gain, t = audio.ac.currentTime;
+  g.cancelScheduledValues(t); g.setTargetAtTime(on ? tune.voice_static : 0, t, on ? 0.02 : 0.05);
+}
+/** Is a call playing or waiting? Cutscenes hold their next line until the channel is free. */
+function voiceBusy() { return !!voice.cur || voice.q.length > 0 || voice.clock < voice.busyUntil; }
+/** Stops the channel; anything still waiting is shown as text at once. */
+function voiceStop() {
+  if (voice.cur && voice.cur.src) try { voice.cur.src.stop(); } catch (e) { /* already stopped */ }
+  if (voice.cur) voice.cur.msg.shown = voice.cur.msg.text.length;
+  voice.cur = null;
+  for (const it of voice.q) pushMsg(it.text, it.color, 0, true);
+  voice.q.length = 0; voice.busyUntil = 0; voiceHiss(false);
+}
+/** Starts the next call when the channel is free. Called every step. */
+function voicePump() {
+  voiceLoad();
+  if (!sfx.ok()) { if (voice.q.length) voiceStop(); return; }
+  const now = (voice.clock += STEP);
+  if (voice.cur && now >= voice.cur.end) { voice.cur = null; sfx.squelch(); voiceHiss(false); voice.busyUntil = now + 0.3; }
+  // a text-only line waiting behind a call shows the moment the call before it is done
+  while (!voice.cur && voice.q.length && !voice.buf[voice.q[0].text] && now >= voice.busyUntil) { const it = voice.q.shift(); pushMsg(it.text, it.color, 0, false); sfx.static(0.2); }
+  if (voice.cur || !voice.q.length || now < voice.busyUntil) return;
+  while (voice.q.filter(it => voice.buf[it.text]).length > tune.voice_backlog) { const it = voice.q.shift(); pushMsg(it.text, it.color, 0, true); } // too far behind: oldest go to text
+  if (!voice.q.length || !voice.buf[voice.q[0].text]) return; // a text line is next: it shows on the next step
+  const it = voice.q.shift(), buf = voice.buf[it.text], capcom = it.text.startsWith('CAPCOM');
+  const lead = capcom ? 0.3 : 0.08, start = now + lead;
+  if (capcom) sfx.quindar(true); else sfx.keyup();
+  const src = audio.ac.createBufferSource(), g = audio.ac.createGain();
+  src.buffer = buf; g.gain.value = tune.voice_volume * 1.6; src.connect(g); g.connect(audio.out); src.start(audio.ac.currentTime + lead);
+  voiceHiss(true);
+  const msg = pushMsg(it.text, it.color, it.text.length / Math.max(0.5, buf.duration - 0.35), false);
+  msg.delay = lead;
+  voice.cur = { src, msg, end: start + buf.duration };
+}
+function pushMsg(text, color, rate, instant) {
+  const m = { text, color, shown: instant ? text.length : 0, age: 0, capcom: text.startsWith('CAPCOM'), rate: rate || 0, delay: 0, closed: instant };
+  state.msgs.push(m); if (state.msgs.length > 14) state.msgs.shift();
+  return m;
+}
+/** A radio call: typed into the RADIO box and onto the visor as a subtitle. Voiced lines queue on the channel; CAPCOM opens with a Quindar tone. */
 function radio(text, color = C.ui) {
+  if (tune.voice && !muted && sfx.ok() && (voice.buf[text] || voiceBusy())) { voice.q.push({ text, color }); return; }
   const capcom = text.startsWith('CAPCOM');
-  state.msgs.push({ text, color, shown: 0, age: 0, capcom });
-  if (state.msgs.length > 14) state.msgs.shift();
+  pushMsg(text, color, 0, false);
   if (capcom) sfx.quindar(true); else sfx.static(0.2);
 }
 /** The same call at most once per cooldown (real seconds). */
 function radioOnce(key, cooldown, text, color) {
   if (state.said[key] !== undefined && state.anim - state.said[key] < cooldown) return;
-  state.said[key] = state.anim; radio(text, color);
+  state.said[key] = state.anim; radio(text, color); return true;
 }
 function cellProf(p) { return profile(p.c, p.r); }
 const kmOf = (c, r) => ({ x: c * SITE.cell_x, y: r * SITE.cell_y });
@@ -876,8 +953,8 @@ function checkSky(hours) {
   if (prev.sunVis && !s.sunVis) { radio('CDR: We just lost the Sun. Cold soak starting; the battery will feel it.', C.amber); sfx.warn(); }
   if (!prev.sunVis && s.sunVis) radio('CDR: Sunlight on the visor. Survey is go.', C.amber);
   if (s.sunVis && prev.sunNext !== null && s.sunNext !== null && prev.sunNext >= tune.dusk_hours && s.sunNext < tune.dusk_hours)
-    radio(`CDR: Sun's touching the ridge. About ${fmtH(s.sunNext)} of light left right here.`, C.amber);
-  if (prev.lEarth && !s.lEarth) { radio('CAPCOM: Ridge Base, Houston, we are losing your dish sig... [static]', C.earth); sfx.warn(); }
+    { radio("CDR: Sun's touching the ridge. We're losing the light here.", C.amber); radio(`SUIT: About ${fmtH(s.sunNext)} of sunlight left at this spot.`, C.amber); }
+  if (prev.lEarth && !s.lEarth) { radio('CAPCOM: Ridge Base, Houston, we are losing your dish signal.', C.earth); sfx.warn(); }
   if (!prev.lEarth && s.lEarth) radio('CAPCOM: Ridge Base, Houston. Dish link is back. Send what you have.', C.earth);
   if (prev.lSun && !s.lSun) radio('ARRAY: Panels are dark. Battery on its own now.', C.amber);
   if (!prev.lSun && s.lSun) radio('ARRAY: Panels see the Sun. Charging.', C.amber);
@@ -885,7 +962,7 @@ function checkSky(hours) {
   if (comm && !state.comm) sfx.link();
   state.comm = comm;
   const pd = state.prevDep === undefined ? toDep + (hours || 0) : state.prevDep;
-  if (toDep <= tune.danger_depart && pd > tune.danger_depart && dL > tune.board_radius) { radio(`CAPCOM: Ridge Base, ascent in ${toDep.toFixed(1)} hours. We need you both at the lander.`, C.red); sfx.warn(); }
+  if (toDep <= tune.danger_depart && pd > tune.danger_depart && dL > tune.board_radius) { radio('CAPCOM: Ridge Base, ascent is coming up. We need you both at the lander.', C.red); radio(`CLOCK: Ascent in ${toDep.toFixed(1)} h.`, C.red); sfx.warn(); }
   if (toDep <= 2 && pd > 2 && dL > tune.board_radius) radio('CDR: Two hours. Floor it.', C.red);
   state.prevDep = toDep;
   const pb = state.prevBatt === undefined ? state.battery : state.prevBatt;
@@ -933,6 +1010,23 @@ function plannerStart() {
   for (let r = 1; r < MR - 1; r++) for (let c = 2; c < MC - 2; c++) if (!PSR[r * MC + c] && landSlope(c, r) <= tune.land_slope_max) cells.push([c, r]);
   return { cells, i: 0, best: null, done: false, mi: state.mi };
 }
+/**
+ * Independent re-check of a site for the debrief: the raw LOLA heights (no smoothing), 720 directions, 140 km,
+ * the validation screen's method. Returns Sun and Earth shares over the window and the closest call (deg above skyline).
+ */
+function rawCheck(c, r, L, D) {
+  if (!rawCheck.g) rawCheck.g = [lolaGrid(LOLA.fine, 0), lolaGrid(LOLA.coarse, 0)];
+  const G = rawCheck.g, Hh = (a, b) => { const z = sampleGrid(G[0], a, b); return z === z ? z : sampleGrid(G[1], a, b); };
+  const x = c * SITE.cell_x, y = r * SITE.cell_y, h0 = Hh(x, y) + 0.002, NA = 720, p = new Float32Array(NA);
+  for (let a = 0; a < NA; a++) { const az = (a + 0.5) * 360 / NA * D2R, sx = Math.sin(az), sy = -Math.cos(az); let m = -1;
+    for (let d = 0.04; d < 140; d *= 1.04) { const s = (Hh(x + sx * d, y + sy * d) - d * d / (2 * MOON_R) - h0) / d; if (s > m) m = s; }
+    p[a] = Math.atan(m) * R2D - tiltAt(x, y, sx, sy) * R2D; }
+  const hz = az => { const f = az / 360 * NA - 0.5, i = Math.floor(f), w = f - i; return p[(i + NA) % NA] * (1 - w) + p[(i + 1) % NA] * w; };
+  let s = 0, e = 0, n = 0, mS = 99, mE = 99, top = -99, sky = -99;
+  for (let t = 0; t <= D; t += 1) { n++; const S = sunAt(L + t), E = earthAt(L + t), dS = S.el - hz(S.az), dE = E.el - hz(E.az);
+    if (dS > 0) s++; if (dE > 0) e++; mS = Math.min(mS, dS); mE = Math.min(mE, dE); top = Math.max(top, S.el); sky = Math.max(sky, S.el - dS); }
+  return { sun: Math.round(100 * s / n), earth: Math.round(100 * e / n), mS, mE, top, sky };
+}
 function plannerRun(n) {
   const P = state.plan; if (!P || P.done || !state.land) return;
   const D = mission(P.mi).duration;
@@ -941,7 +1035,8 @@ function plannerRun(n) {
     const near = Math.hypot(c - state.land.c, (r - state.land.r) * 1.78); // ties go to the spot nearest yours
     if (!P.best || v > P.best.v || (v === P.best.v && near < P.best.near)) P.best = { c, r, v, near, ...s };
   }
-  if (P.i >= P.cells.length) P.done = true;
+  if (P.i >= P.cells.length) { P.done = true; const D2 = mission(P.mi).duration;
+    P.chkY = rawCheck(state.land.c, state.land.r, state.landOff, D2); P.chkB = rawCheck(P.best.c, P.best.r, state.landOff, D2); }
 }
 /** Departure: aboard the lander, the crew goes home; out on the rover, the window closes without you. */
 function departNow() { endMission(landerDist() <= tune.board_radius ? 'depart' : 'stranded'); }
@@ -960,12 +1055,12 @@ function act() {
     const n = Math.min(state.data, tune.transmit_rate);
     state.data -= n; state.sent += n; state.battery = Math.max(0, state.battery - tune.transmit_cost);
     state.pulses.push({ t: 0 }); sfx.chirp();
-    radio(`CAPCOM: Copy ${Math.round(n)} points, Ridge Base. ${state.data > 0 ? Math.round(state.data) + ' still on board.' : 'Board is clear.'}`, C.earth);
+    radio(state.data > 0 ? 'CAPCOM: Copy your data, Ridge Base. Keep it coming.' : 'CAPCOM: Copy all your data, Ridge Base. Board is clear.', C.earth); radio(`DISH: ${Math.round(n)} points sent${state.data > 0 ? ', ' + Math.round(state.data) + ' still on board' : ''}.`, C.earth);
     events.push({ type: 'transmit', n });
     advance(tune.transmit_hours, 'work');
   } else if (st.kind === 'survey') {
     if (usesLeft(st.id) <= 0) { radio('CDR: This outcrop is fully surveyed.', C.uiDim); return; }
-    if (!s.sunVis) { radio('CDR: Sun is hidden here. Survey needs light. Wait (Z) or drive.', C.amber); sfx.warn(); return; }
+    if (!s.sunVis) { radio('CDR: Sun is hidden here. Survey needs light. We wait, or we drive.', C.amber); sfx.warn(); return; }
     const y = tune.survey_yield * (state.calibrated ? tune.calibrate_bonus : 1);
     state.data += y; state.calibrated = false; state.uses[st.id] = usesLeft(st.id) - 1;
     state.battery = Math.max(0, state.battery - tune.survey_cost);
@@ -1002,7 +1097,7 @@ function land() {
     state.slipDone = true; state.landMin = state.landOff + tune.slip_hours; state.landOff = state.landMin;
     state.statCache.clear(); updateSky(); sfx.warn();
     state.dialog = { title: `LAUNCH SLIP +${tune.slip_hours}h`, text: `CAPCOM: Hold, hold, hold. A valve on the descent stage needs a recheck. Your landing slips ${tune.slip_hours} hours. The Sun and Earth have moved along the skyline; your flags have been re-scored for the new hour. Re-pick a site, or hold this one. ENTER to land when ready.`, shown: 0 };
-    radio(`CAPCOM: Landing slipped ${tune.slip_hours} h. Watch the sky move.`, C.red);
+    radio('CAPCOM: Your landing has slipped. Watch the sky move.', C.red); radio(`LANDER: Landing +${tune.slip_hours} h.`, C.red);
     return;
   }
   state.land = { c, r };
@@ -1050,7 +1145,7 @@ function driveRover(dt) {
   // too steep: the wheels spin out, the rover stops
   if (Math.abs(R.v) > 0.002 && grade * Math.sign(R.v) > tune.slope_max) {
     R.v = -R.v * 0.15; sfx.bump(0.5);
-    radioOnce('steep', 4, `CDR: Too steep, ${Math.round(Math.atan(Math.abs(grade)) * R2D)}°. Find another line.`, C.red);
+    if (radioOnce('steep', 4, 'CDR: Too steep. Find another line.', C.red)) radio(`ROVER: Grade ${Math.round(Math.atan(Math.abs(grade)) * R2D)}°.`, C.red);
   }
   let nx = R.x + fx * R.v * dt, ny = R.y + fy * R.v * dt;
   const cx = clamp(nx, HGF.x0 + 1, HGF.x0 + (HGF.nx - 1) * HGF.q - 1), cy = clamp(ny, HGF.y0 + 1, HGF.y0 + (HGF.ny - 1) * HGF.q - 1);
@@ -1107,8 +1202,8 @@ function objective() {
 const CUTS = {
   landing: [
     [0.3, 'CAPCOM: Lander, Houston. You are GO for powered descent.'],
-    [2.2, 'LMP: Twelve hundred metres, down at twenty. Site is in the window.'],
-    [4.0, 'LMP: Three hundred. Long shadows down there; the ridge is lit.'],
+    [2.2, 'LMP: Two hundred fifty metres, down at ten. Site is in the window.'],
+    [4.0, 'LMP: One hundred twenty. Long shadows down there; the ridge is lit.'],
     [5.6, 'LMP: Picking up dust. Thirty metres, down at two.'],
     [7.0, 'CDR: Contact light.'],
     [7.6, 'CDR: Engine stop. Houston, Ridge Base. We are down.'],
@@ -1118,13 +1213,45 @@ const CUTS = {
     [0.3, 'CAPCOM: Ridge Base, Houston. You are GO for ascent.'],
     [1.2, 'CDR: Ascent engine arm. Three, two, one, proceed.'],
     [2.6, 'LMP: We are off. Look at that shadow line down there.'],
-    [4.6, () => state.sent > 0 ? `CAPCOM: We copy, ascent nominal. ${Math.round(state.sent)} points made it home. Welcome back.` : 'CAPCOM: Ascent nominal. ...Nothing came through the dish this time. Bring them home.'],
+    [4.6, () => state.sent > 0 ? ['CAPCOM: We copy, ascent nominal. Your science made it home. Welcome back.', `DISH: ${Math.round(state.sent)} points reached Earth.`] : 'CAPCOM: Ascent nominal. Nothing came through the dish this time. Bring them home.'],
   ],
 };
+/** Cutscene length (s): stretched while the crew is speaking, so the calls land on the pictures. */
 const CUT_BASE = { landing: 10, launch: 8 }, CUT_HIT = { landing: 0.7, launch: 0.2 };
 function speakerColor(t) { return t.startsWith('CAPCOM') ? C.ui : t.startsWith('CDR') ? C.white : t.startsWith('LMP') ? '#bfe8ff' : C.amber; }
+/** Picks the cutscene camera: the first angle around the site (and the lowest lift) whose line of sight to the lander's feet clears the terrain. */
+function cutCamera(kind) {
+  const L = kmOf(state.land.c, state.land.r), tH = kind === 'landing' ? state.landOff : state.t, sun = sunAt(tH), dist = tune.cut_cam_dist;
+  const base = hgt(L.x, L.y);
+  for (const up of [0.006, 0.02, 0.045, 0.08]) for (const off of [62, 40, 85, 20, 110, 0, 135, -25, 160, -50, 185, -90, 220, -130]) {
+    const a = ((sun.az + off) % 360 + 360) % 360, cx = L.x + Math.sin(a * D2R) * dist, cy = L.y - Math.cos(a * D2R) * dist, eye = hgt(cx, cy) + up;
+    let clear = true;
+    for (let i = 1; i < 48 && clear; i++) { const f = i / 48, line = eye + (base - eye) * f; if (hgt(cx + (L.x - cx) * f, cy + (L.y - cy) * f) > line + 0.0015) clear = false; }
+    if (clear) return { off, up };
+  }
+  return { off: 62, up: 0.08 };
+}
+/**
+ * Lays out a cutscene before it plays: each call gets a slot no earlier than its scripted time and after the
+ * previous call has finished (clip lengths are known), and the touchdown or ignition moves to its call.
+ * The picture then runs without stopping and every call lands on its moment.
+ */
+function cutPlan(kind) {
+  const lines = CUTS[kind], base = kind === 'landing' ? tune.cut_landing : tune.cut_launch, k = base / CUT_BASE[kind];
+  const voiced = tune.voice && !muted && sfx.ok() && Object.keys(voice.buf).length > 0;
+  const texts = lines.map(l => [].concat(typeof l[1] === 'function' ? l[1]() : l[1]));
+  const at = [], ends = []; let free = 0;
+  texts.forEach((ts, i) => {
+    const s = Math.max(lines[i][0] * k, free); let d = 0;
+    if (voiced) for (const t of ts) if (voice.buf[t]) d += (t.startsWith('CAPCOM') ? 0.3 : 0.08) + voice.buf[t].duration + 0.35;
+    at.push(s); ends.push(s + d); free = s + d;
+  });
+  const hitI = kind === 'landing' ? Math.max(0, texts.findIndex(ts => /Contact light/.test(ts[0]))) : 1;
+  const hitT = kind === 'landing' ? Math.max(CUT_HIT.landing * base, at[hitI]) : Math.max(CUT_HIT.launch * base, ends[hitI]);
+  return { at, texts, hitT, dur: Math.max(base, free + 0.6, hitT + 1.5) };
+}
 function startCut(kind) {
-  state.cut = { kind, t: 0, said: 0, hit: false };
+  state.cut = { kind, t: 0, said: 0, hit: false, cam: cutCamera(kind), ...cutPlan(kind) };
   scene = 'cut';
   playTheme(kind === 'landing' ? 'landing' : state.sent > 0 ? 'launch' : 'uneasy');
 }
@@ -1177,13 +1304,15 @@ function earthDisc(cx, cy, RX, sun, earth, vis, t, clip) {
     const nz = Math.sqrt(1 - q), I = nx * Lx + nz * Lz;
     const lon = Math.atan2(nx, nz) * R2D + rot, lat = Math.asin(Math.max(-1, Math.min(1, -ny))) * R2D;
     const land = vnoise(lon / 38 + 50, lat / 30 + 20) > 0.6, ice = Math.abs(lat) > 68;
-    if (I <= 0.03) { // the night side: faint, so a "new Earth" can still be found; a blue rim of air, city lights on land
-      if (q > 0.86) fput(fc, fr, dotOf(0.32), '#2c5c9c');
-      else if (land && !ice && hash2(Math.round(lon * 2), Math.round(lat * 2)) < 0.12) fput(fc, fr, dotOf(0.3), '#d8a050');
-      else fput(fc, fr, dotOf(0.14), land ? '#1c2434' : '#11264a');
+    const cl = vnoise(lon / 18 + 3 + t * 0.02, lat / 9 + 8) * 0.7 + vnoise(lon / 7, lat / 5) * 0.3;
+    if (I <= 0.03) { // the night side, brightened for play so continents, seas and clouds still read; air rim, city lights
+      if (q > 0.9) fput(fc, fr, dotOf(0.4), '#3a6cb0');
+      else if (land && !ice && cl <= 0.62 && hash2(Math.round(lon * 2), Math.round(lat * 2)) < 0.14) fput(fc, fr, dotOf(0.36), '#e0aa58');
+      else if (cl > 0.62 || ice) fput(fc, fr, dotOf(0.5), '#8c9cb4');
+      else if (land) fput(fc, fr, dotOf(0.45), '#6f6a3e');
+      else fput(fc, fr, dotOf(0.42), '#2a62b4');
       continue;
     }
-    const cl = vnoise(lon / 18 + 3 + t * 0.02, lat / 9 + 8) * 0.7 + vnoise(lon / 7, lat / 5) * 0.3;
     const k = Math.min(1, I * 1.15 + 0.05);
     let col;
     if (cl > 0.62 || ice) col = k > 0.6 ? '#f4f8ff' : k > 0.3 ? '#b8c8dc' : '#5d6e84';
@@ -1440,6 +1569,10 @@ function battColor(v) { return v > 50 ? C.ui : v > 25 ? C.amber : C.red; }
 
 function composeHeader() {
   str(1, 0, 'CRATER EXPECTATIONS', C.amber);
+  if (state.mode === 'planner') {
+    str(22, 0, `│ PLANNER MODE · ${utcAt(0)} │ WINDOW ${mission().duration}h${state.pl.play ? ' │ ▶ TIME-LAPSE' : ''}`, C.ui);
+    const rt = `ESC TITLE  │ [M] ${muted ? 'SOUND OFF' : 'SOUND ON'}`; str(COLS - 1 - rt.length, 0, rt, C.uiDim); return;
+  }
   str(22, 0, `│ MISSION ${state.mi + 1}/3 · ${mission().name} │ ${state.phase === 'orbit' ? 'ORBIT · SCOUTING' : 'SURFACE · INSTRUMENTS'}`, C.ui);
   const right = `SCORE ${state.score}  │ SENT ${scene === 'play' ? Math.round(state.sent) : 0}  │ [M] ${muted ? 'SOUND OFF' : 'SOUND ON'}`;
   str(COLS - 1 - right.length, 0, right, C.uiDim);
@@ -1456,7 +1589,7 @@ function composeInstruments() {
   composeHeader();
   const skyH = 13;
   box(0, 1, COLS, skyH, C.uiDim, orbit ? 'SKY FROM SCOUT · 360° SKYLINE' : 'SKY FROM THE ROVER · 360° SKYLINE', C.ui,
-    orbit ? `LANDING HOUR T+${state.landOff}h` : `T+${state.t.toFixed(1)}h`);
+    state.mode === 'planner' ? utcAt(0) : orbit ? `LANDING HOUR T+${state.landOff}h` : `T+${state.t.toFixed(1)}h`);
   bottomText(0, skyH, COLS, 'JPL HORIZONS EPHEMERIS · TERRAIN FROM NASA LRO LOLA, SMOOTHED FOR PLAY · LUNAR CURVATURE', C.uiDark);
   const info = composeSky(s.p, s.sun, s.earth, 2, skyH - 3);
   if (!orbit) { info.sunVis = s.sunVis; info.ev = s.earthVis; }
@@ -1469,9 +1602,12 @@ function composeInstruments() {
 /** The top-down site map, in dots: 8 fine cells per map cell, stations and labels on top. */
 function composeMapBox(y0) {
   const s = state.sky, orbit = state.phase === 'orbit';
-  box(0, y0, 102, 28, C.uiDim, orbit ? 'CONNECTING RIDGE · 89.6°S · SCOUT VIEW · [V] GROUND VIEW' : 'CONNECTING RIDGE · 89.6°S · MISSION AREA · RELEASE TAB', C.ui, '1 CELL ≈ 300 M');
+  const planning = state.mode === 'planner';
+  box(0, y0, 102, 28, C.uiDim, planning ? `PLANNER · CURSOR ${fmtLL(GEO.toLatLon(state.cursor.c * SITE.cell_x, state.cursor.r * SITE.cell_y))}` : orbit ? 'CONNECTING RIDGE · 89.6°S · SCOUT VIEW · [V] GROUND VIEW' : 'CONNECTING RIDGE · 89.6°S · MISSION AREA · RELEASE TAB', C.ui, '1 CELL ≈ 300 M');
   const F0 = FX * MAP_C0, R0 = FY * MAP_R0;
   for (let j = 0; j < FMR; j++) for (let i = 0; i < FMC; i++) { const n = j * FMC + i; if (mapCh[n] !== ' ') fput(F0 + i, R0 + j, mapCh[n], mapFg[n]); }
+  if (planning && state.pl.heatOn) composeHeat(F0, R0, y0);
+  if (planning) for (const S of PL_SITES) if (S.cell) { put(MAP_C0 + S.cell.c, MAP_R0 + S.cell.r, '◇', C.white); lab(MAP_C0 + S.cell.c + 2, MAP_R0 + S.cell.r, S.tag, C.uiDim, 1, 100); }
   for (const L of SITE.labels) lab(MAP_C0 + L.c, MAP_R0 + L.r, L.text, C.uiDim);
   const fpos = (x, y) => [F0 + (x / SITE.cell_x + 0.5) * FX - 0.5, R0 + (y / SITE.cell_y + 0.5) * FY - 0.5];
   state.track.forEach((p, k) => { if (k % 2 === 0) { const [a, b] = fpos(p.x, p.y); fput(a, b, '•', '#c9cfd6'); } });
@@ -1479,7 +1615,7 @@ function composeMapBox(y0) {
     const done = usesLeft(kind + i) <= 0, f = done ? colDone : col;
     put(MAP_C0 + c - 1, MAP_R0 + r, '[', f); put(MAP_C0 + c, MAP_R0 + r, kind === 'survey' ? 'S' : 'D', f); put(MAP_C0 + c + 1, MAP_R0 + r, ']', f);
   });
-  stn(SITE.survey, 'survey', C.amber, '#5a4a30'); stn(SITE.drill, 'drill', C.white, '#555'); stn(SITE.psr_drill, 'psr', '#6fb6ff', '#2a4060');
+  if (!planning) stn(SITE.survey, 'survey', C.amber, '#5a4a30'); if (!planning) { stn(SITE.drill, 'drill', C.white, '#555'); stn(SITE.psr_drill, 'psr', '#6fb6ff', '#2a4060'); }
   const edge = (az, ch, col) => { // edge markers for the Sun and Earth directions
     const sx = Math.sin(az * D2R) / SITE.cell_x, sy = -Math.cos(az * D2R) / SITE.cell_y, m = Math.hypot(sx, sy);
     let x = 50, y = 13; while (x >= 0 && x < MC && y >= 0 && y < MR) { x += sx / m; y += sy / m; }
@@ -1510,9 +1646,10 @@ function composeMapBox(y0) {
 function labelObjects(W, objs, c0, cmax, rmin, rmax) {
   const obj = state.obj, blink = Math.floor(state.anim * 2.5) % 2;
   for (const m of objs) {
-    const P = sprite(W, m.x, m.y, m.spr, m.pal);
+    const P = sprite(W, m.x, m.y, m.spr, m.pal, tune.obj_min_rows);
     if (!P || !P.seen || !P.onScreen) continue;
     const isObj = obj && obj.tag === m.tag;
+    if (isObj && W.beacon) continue; // the beacon carries the objective's label
     if (P.d > 9 && !isObj) continue;
     const txt = `${isObj ? '◆ ' : ''}${m.tag} ${P.d < 1 ? Math.round(P.d * 1000) + 'm' : P.d.toFixed(1) + 'km'}`;
     const row = clamp(Math.floor((W.fr0 + P.top) / FY) - 1, rmin, rmax);
@@ -1523,7 +1660,7 @@ function labelObjects(W, objs, c0, cmax, rmin, rmax) {
 function composeOrbitView(y0) {
   const c = state.cursor, x = c.c * SITE.cell_x, y = c.r * SITE.cell_y;
   const w = 100 * FX, rows = (40 - y0) * FY, fc0 = FX, fr0 = (y0 + 1) * FY;
-  const cam = { x, y, eye: hgt(x, y) + tune.eye_h, hd: state.hd, pitch: 0, roll: 0, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.landOff };
+  const cam = { x, y, eye: hgt(x, y) + tune.eye_h, hd: state.hd, pitch: 0, roll: 0, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.landOff, sprScale: tune.obj_scale };
   box(0, y0, 102, 42 - y0, C.uiDim, `GROUND VIEW FROM SCOUT · FACING ${DIRN[dir8(state.hd)]} ${Math.round(state.hd)}°`, C.ui, `VERTICAL ×${(cam.dpc * FH / FW / cam.dpr).toFixed(1)} · [V] MAP`);
   const Wd = drawWorld(cam, w, rows, fc0, fr0);
   labelObjects(Wd, worldObjects(), 1, 100, y0 + 1, 40);
@@ -1570,12 +1707,42 @@ function surfaceHint() {
   if (st.kind === 'array') return ['[E] LOW-POWER WAIT', C.amber];
   return usesLeft(st.id) <= 0 ? ['EXHAUSTED', C.uiDim] : state.battery >= tune.drill_reserve ? ['[E] DRILL', C.white] : ['DRILL: LOW BATTERY', C.red];
 }
+/**
+ * The objective beacon: a light column standing on the target with its name and distance on top. It is drawn
+ * whenever the target is inside the view, at any range and through ridges (dashed when the ground hides its foot),
+ * so facing a station never makes it disappear. Off to the side, the edge arrow takes over.
+ */
+function composeBeacon(W, cam, cmin, cmax, rmin) {
+  const obj = state.obj; if (!obj) return false;
+  const dx = obj.x - cam.x, dy = obj.y - cam.y, d = Math.hypot(dx, dy);
+  const rel = angDiff(Math.atan2(dx, -dy) * R2D, cam.hd);
+  if (Math.abs(rel) > tune.pov_fov / 2 - 2) return false;
+  const i = W.w / 2 + rel / cam.dpc, el = Math.atan2(hgt(obj.x, obj.y) - d * d / (2 * MOON_R) - cam.eye, Math.max(d, 0.001)) * R2D;
+  const base = Math.min(W.rows - 1, W.rowAt(i) - el / cam.dpr), vi = Math.floor(i);
+  const hidden = base >= 0 && base < W.rows && W.V.dep[Math.floor(base) * W.w + clamp(vi, 0, W.w - 1)] < d * 0.97;
+  const top = (rmin + 2) * FY - W.fr0, pulse = 0.5 + 0.5 * Math.sin(state.anim * 5), col = obj.col;
+  const hot = pulse > 0.5 ? '#ffffff' : col;
+  const bot = Math.min(W.rows - 1, Math.max(base, top + W.rows * 0.3)); // a target uphill still gets a full column
+  for (let r = Math.floor(top); r < bot; r++) {
+    if (hidden && r % 4 === 3) continue;
+    const run = (r + Math.floor(state.anim * 14)) % 7 === 0; // a light pulse climbing the column
+    fput(W.fc0 + vi, W.fr0 + r, '●', run ? '#ffffff' : col);
+    fput(W.fc0 + vi - 1, W.fr0 + r, '•', run ? hot : col); fput(W.fc0 + vi + 1, W.fr0 + r, '•', run ? hot : col);
+    fput(W.fc0 + vi - 2, W.fr0 + r, '·', C.uiDim); fput(W.fc0 + vi + 2, W.fr0 + r, '·', C.uiDim);
+  }
+  if (base > 0 && base < W.rows) for (let a = 0; a < 12; a++) { const s = (a / 12) * Math.PI * 2, rr = 2 + pulse * 2;
+    fput(W.fc0 + vi + Math.cos(s) * rr * 2, W.fr0 + base + Math.sin(s) * rr * 0.6, '·', col); } // a ring on the ground
+  const txt = `▼ ${obj.tag} ${d < 1 ? Math.round(d * 1000) + ' m' : d.toFixed(1) + ' km'}${hidden ? ' · BEHIND RIDGE' : ''}`;
+  lab(Math.floor((W.fc0 + i) / FX) - Math.floor(txt.length / 2), rmin + 1, txt, Math.floor(state.anim * 2.5) % 2 ? col : C.white, cmin, cmax);
+  return true;
+}
 function composeVisor(c0, r0, bw, bh) {
   const s = state.sky, R = state.rover, w = (bw - 2) * FX, rows = (bh - 2) * FY, fc0 = (c0 + 1) * FX, fr0 = (r0 + 1) * FY;
-  const cam = { x: R.x, y: R.y, eye: R.eye, hd: R.hd, pitch: R.pitch * tune.cam_tilt, roll: -R.roll * tune.cam_tilt, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.t };
+  const cam = { x: R.x, y: R.y, eye: R.eye, hd: R.hd, pitch: R.pitch * tune.cam_tilt, roll: -R.roll * tune.cam_tilt, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.t, sprScale: tune.obj_scale };
   box(c0, r0, bw, bh, C.uiDark, `ROVER · ${DIRN[dir8(R.hd)]} ${Math.round(R.hd)}°`, C.uiDim, `VERTICAL ×${(cam.dpc * FH / FW / cam.dpr).toFixed(1)} · HOLD TAB: INSTRUMENTS`);
   const W = drawWorld(cam, w, rows, fc0, fr0), blink = Math.floor(state.anim * 2.5) % 2;
   const cmin = c0 + 1, cmax = c0 + bw - 2, rmin = r0 + 2, rmax = r0 + bh - 9;
+  W.beacon = composeBeacon(W, cam, cmin, cmax, rmin);
   labelObjects(W, worldObjects(), cmin, cmax, rmin, rmax);
   // the sunset and Earthset clocks hang under the bodies themselves, or ride the edge when off-screen
   const hang = (P, rad, name, text, col) => {
@@ -1618,9 +1785,9 @@ function composeVisor(c0, r0, bw, bh) {
   // the slim rover dashboard, on the cowl
   const kmh = Math.abs(R.v) / tune.time_scale, sp = Math.abs(R.v) / tune.rover_speed, n = Math.round(sp * 8);
   const [hint, hcol] = surfaceHint();
-  const dash = `${R.v < -0.002 ? 'REV' : 'SPD'} ${kmh.toFixed(1).padStart(4)} km/h ${'▮'.repeat(n)}${'▯'.repeat(8 - n)}  GRADE ${sgn(R.grade * 100, 0)}%  BATT ${Math.round(state.battery)}%`;
+  const dash = `${R.v < -0.002 ? 'REV' : 'SPD'} ${kmh.toFixed(1).padStart(4)} km/h ${'▮'.repeat(n)}${'▯'.repeat(8 - n)}  GRADE ${sgn((R.grade || 0) * 100, 0)}%  BATT ${Math.round(state.battery)}%`;
   const dc = Math.floor(c0 + bw / 2 - (dash.length + hint.length + 3) / 2);
-  lab(dc, r0 + bh - 3, dash, Math.abs(R.grade) > tune.slope_max * 0.8 ? C.red : C.uiDim, cmin, cmax);
+  lab(dc, r0 + bh - 3, dash, Math.abs(R.grade || 0) > tune.slope_max * 0.8 ? C.red : C.uiDim, cmin, cmax);
   if (state.battery < tune.danger_batt) str(dc + dash.length - 8, r0 + bh - 3, `BATT ${Math.round(state.battery)}%`, blink ? C.red : C.amber);
   if (hint) lab(dc + dash.length + 3, r0 + bh - 3, hint, hcol, cmin, cmax);
   composeCompass(W, cam, r0 + bh - 1, cmin + 1, cmax - 1);
@@ -1731,10 +1898,10 @@ function composeBarSlim() {
  */
 function composeCut() {
   clearGrid(); fx.sun = null; fx.earth = null; fx.red = 0;
-  const c = state.cut, landing = c.kind === 'landing', dur = landing ? tune.cut_landing : tune.cut_launch, hitT = CUT_HIT[c.kind] * dur;
+  const c = state.cut, landing = c.kind === 'landing', dur = c.dur, hitT = c.hitT;
   const L = kmOf(state.land.c, state.land.r), tH = landing ? state.landOff : state.t;
   const w = COLS * FX, rows = 38 * FY, fr0 = 3 * FY;
-  const sun = sunAt(tH), azc = (sun.az + 62) % 360, dist = tune.cut_cam_dist;
+  const sun = sunAt(tH), azc = (sun.az + c.cam.off + 360) % 360, dist = tune.cut_cam_dist;
   const cx = L.x + Math.sin(azc * D2R) * dist, cy = L.y - Math.cos(azc * D2R) * dist;
   let alt, shake = 0, engine;
   if (landing) {
@@ -1746,7 +1913,7 @@ function composeCut() {
     alt = tune.cut_alt * 1.6 * Math.pow(s, 2); engine = c.t >= hitT - 0.25 ? 1 : 0;
     if (c.t > hitT - 0.25 && c.t < hitT + 0.8) shake = (hash2(Math.floor(c.t * 30), 2) - 0.5) * 4;
   }
-  const eye = hgt(cx, cy) + 0.006, hd = Math.atan2(L.x - cx, -(L.y - cy)) * R2D;
+  const eye = hgt(cx, cy) + c.cam.up, hd = Math.atan2(L.x - cx, -(L.y - cy)) * R2D;
   const craftH = (landing ? SPRITES.lander.h : SPRITES.ascent.h) / 1000, craftAlt = landing ? alt : alt + SPRITES.descent.h / 1000;
   const elC = Math.atan2(hgt(L.x, L.y) + craftAlt + craftH / 2 - eye, dist) * R2D;
   const dpc = tune.pov_fov / w, dpr = dpc * FW / FH; // true vertical scale here: the craft is enlarged instead, so sky and ground share the frame
@@ -1803,11 +1970,12 @@ function composePanel(y0) {
   const ex = 121, a = y0 + 1;
   str(ex, a, `EL ${sgn(s.earth.el, 1)}°`, C.earth); str(ex, a + 1, `AZ ${Math.round(s.earth.az)}°`, C.earth);
   str(ex, a + 2, `PHASE ${Math.round(s.phase.frac * 100)}%`, C.white);
-  if (s.phase.frac < 0.15) str(ex, a + 3, 'NEW EARTH: DARK SIDE', C.earthDim);
+  if (s.phase.frac < 0.15) str(ex, a + 3, 'NIGHT SIDE BOOSTED', C.earthDim);
   str(ex, a + 4, s.earthVis ? 'IN VIEW' : s.earth.el > 0 ? 'HIDDEN BY' : 'BELOW', s.earthVis ? C.ui : C.red);
   if (!s.earthVis) str(ex, a + 5, s.earth.el > 0 ? 'THE RIDGE' : 'HORIZON', C.red);
   str(ex, a + 7, `SUN ${sgn(s.sun.el)}°`, C.amber); str(ex, a + 8, `AZ ${Math.round(s.sun.az)}°`, C.amber);
   const b = y0 + 11;
+  if (state.mode === 'planner') { composePlannerPanel(b); return; }
   if (orbit) {
     box(102, b, 40, 10, C.uiDim, 'FLAGS · COMPARE SITES', C.ui);
     const D = mission().duration;
@@ -1852,7 +2020,7 @@ function composeBar() {
   let x = 2;
   const seg = (t, col) => { str(x, 43, t, col); x += t.length; };
   const sep = () => seg(' │ ', C.uiDark);
-  if (orbit) { seg(`LANDING T+${state.landOff}h`, C.ui); sep(); }
+  if (state.mode === 'planner') { seg(utcAt(0), C.ui); sep(); } else if (orbit) { seg(`LANDING T+${state.landOff}h`, C.ui); sep(); }
   seg(`SUN ${sgn(s.sun.el)}° `, C.amber);
   seg(s.sunVis ? `CLEARS SKYLINE ${sgn(s.sun.el - s.hzSun)}°` : (s.sun.el > 0 ? `HIDDEN BY RIDGE ${sgn(s.sun.el - s.hzSun)}°` : 'BELOW HORIZON'), s.sunVis ? C.sun : C.red);
   sep(); seg(s.sunVis ? `SUNSET IN ${fmtH(s.sunNext)}` : `SUNRISE IN ${fmtH(s.sunNext)}`, s.sunVis && s.sunNext !== null && s.sunNext < 6 ? C.red : C.amber);
@@ -1863,7 +2031,8 @@ function composeBar() {
     const [hint, hcol] = surfaceHint();
     seg(hint || `ASCENT IN ${fmtH(state.depart - state.t)}`, hint ? hcol : C.uiDim);
   }
-  bottomText(0, 44, COLS, orbit ? (state.view === 'pov' ? 'ARROWS move scout · Q/E look · V map · F flag · [ ] hour · ENTER land · H tour · ESC · M' : 'ARROWS move scout · F flag · [ ] landing hour · 1-3 jump · V ground view · ENTER land · H tour · ESC · M')
+  bottomText(0, 44, COLS, state.mode === 'planner' ? 'ARROWS move · N site · L lat/lon · [ ] ±1h · , . ±1 day · - = ±7 days · Y window · P time-lapse · T slip · B heat map · F flag · H guide'
+    : orbit ? (state.view === 'pov' ? 'ARROWS move scout · Q/E look · V map · F flag · [ ] hour · ENTER land · H tour · ESC · M' : 'ARROWS move scout · F flag · [ ] landing hour · 1-3 jump · V ground view · ENTER land · H tour · ESC · M')
     : 'INSTRUMENTS · release TAB (or V) for the visor · W/S A/D keep driving · ESC pause · M mute', C.uiDim);
 }
 function composeDialog() {
@@ -1910,6 +2079,33 @@ const titleProf = () => profile(78, 8);
 // Each step lights one part of the screen (the rest dims) and explains it in plain words. It runs once per
 // session in Mission 1 (orbit, then again after touchdown); H shows the current one again.
 const TOUR = {
+  planner: [
+    { title: 'WELCOME TO PLANNER MODE', text: [
+      'This is the tool behind the game. Pick any hour of 2027 and any spot on Connecting Ridge, near the Moon’s south pole, and see when the Sun and Earth are in view from there.',
+      'Mission planners ask exactly this to choose a landing site and a landing date: sunlight for power, Earth for radio. No score and no clock here: explore.',
+      'This tour takes about a minute.'] },
+    { title: 'THE SKY ON YOUR DATE', rect: [0, 1, COLS, 13], cap: [36, 16], text: () => [
+      `The skyline from the cursor on ${utcAt(0)}. Above the jagged line means in view; behind a ridge means hidden, even when the Sun or Earth is "up".`,
+      '+ [ and ] step one hour, , and . one day, - and = one week. P plays a time-lapse: watch the Sun circle the horizon.',
+      `+ Y changes the window you plan over, from 1 day to a whole lunar month. Now: ${mission().duration} hours.`] },
+    { title: 'SITES AND COORDINATES', rect: [0, 14, 102, 28], cap: [38, 1], text: [
+      'Move the cursor with the ARROW keys; the map title gives its latitude and longitude.',
+      '◇ marks named sites. C2, S0 and S1 come from a published NASA illumination study; M1 and PSR are game landmarks. N jumps between them.',
+      '+ L lets you type any coordinates, e.g. 89.31S 245.98E. The terrain covers only this 30 x 14 km map, and the game tells you when a spot is off it.'] },
+    { title: 'COMPARE UP TO 3 SITES', rect: [102, 25, 40, 17], cap: [24, 12], text: () => { const st = plStats(state.cursor.c, state.cursor.r); return [
+      'F plants a flag where the cursor is (up to 3); 1, 2, 3 jump back to them.',
+      'Each row is the window as a timeline: █ Sun and Earth, ▀ Sun only, ▄ Earth only, · dark. Then the Sun % and Earth % of the window.',
+      `The line under it: time to the next SUNSET or SUNRISE, to the next E.SET (Earthset), and how far the Sun clears the skyline now. HERE: Sun ${st.sun}%, Earth ${st.earth}%, ${st.sunVis ? 'sunset' : 'sunrise'} in ${fmtH(st.sunNext)}.`]; } },
+    { title: 'THE SLIP TEST', rect: [102, 25, 40, 17], cap: [24, 14], text: [
+      'Landings slip. T shows each site’s Sun % if you land 1, 3 or 7 days late.',
+      'Green holds up. Amber or red means the site only works on your exact date: a risky pick.'] },
+    { title: 'THE BEST-SITES HEAT MAP', rect: [0, 14, 102, 28], cap: [38, 1], text: [
+      'B colours every landable cell by (Sun % + Earth %) / 2 over the window: green is best, red worst. Blue never sees the Sun (cold traps: ice, but no power); grey is too steep to land.',
+      '+ Try a winter date: press - about a dozen times to reach late July, and the ridge splits into winners and losers.'] },
+    { title: 'ARE THESE NUMBERS RIGHT?', text: [
+      'Press V on the title for the Validation screen. It sets the game’s sunlight at the published sites, and its Sun and Earth heights, against the published values and JPL Horizons, and checks that Shackleton’s floor never sees the Sun.',
+      'H shows this guide again. ESC goes back to the title.'] },
+  ],
   orbit: [
     { title: 'WELCOME TO RIDGE BASE', text: [
       'You run a crewed landing near the Moon\'s south pole. Land, collect science, send it home to Earth, and get the crew back to the lander before the ascent window closes.',
@@ -1966,7 +2162,7 @@ const TOUR = {
       'Press H any time to see this tour again. Good luck, Ridge Base.'] },
   ],
 };
-const tourSeen = { orbit: false, surface: false };
+const tourSeen = { orbit: false, surface: false, planner: false };
 function startTour(kind) { state.tour = { kind, i: 0 }; tourSeen[kind] = true; sfx.beep(990); }
 function maybeTour(kind) { if (tune.walkthrough && state.mi === 0 && !tourSeen[kind]) startTour(kind); }
 /** Keys while the tour is up: ENTER / → next, BACKSPACE / ← back, ESC skip. The game waits. */
@@ -2070,12 +2266,16 @@ function composeDebrief(win) {
     const dx = kmB.x - kmY.x, dy = kmB.y - kmY.y, dist = Math.hypot(dx, dy), dir = DIRN[Math.round(((Math.atan2(dx, -dy) * R2D + 360) % 360) / 45) % 8];
     const why = [], dS = B.sun - K.sun, dE = B.earth - K.earth, dH = (hgt(kmB.x, kmB.y) - hgt(kmY.x, kmY.y)) * 1000;
     const you = K.sun + K.earth, best = B.sun + B.earth, rank = Math.round(100 * you / Math.max(1, best));
-    why.push([`Your site scored ${rank}% of the best of ${P.cells.length} landable sites. The planner's pick is ${dist.toFixed(1)} km ${dir} of yours${dist < 0.4 ? ': you found it.' : '.'}`, rank >= 95 ? C.ui : rank >= 75 ? C.amber : C.red]);
+    const where = dist < 0.05 ? "The planner's pick is your exact spot: you found it." : `The planner's pick is ${dist.toFixed(1)} km ${dir} of yours${rank >= 95 && dist < 0.4 ? ': you found it.' : dist < 0.4 ? ': close, and those few hundred metres matter.' : '.'}`;
+    why.push([`Your site scored ${rank}% of the best of ${P.cells.length} landable sites. ${where}`, rank >= 95 ? C.ui : rank >= 75 ? C.amber : C.red]);
     if (dS > 5) why.push([`Its array sees the Sun ${dS} points more of the time${dH > 60 ? `: it stands ${Math.round(dH)} m higher, so it looks over the ridges that hide the Sun from you.` : ': its view along the Sun\'s path is clearer.'}`, C.amber]);
     if (dE > 5) why.push([`Its dish keeps Earth ${dE} points longer: ${dH > 60 ? 'higher ground clears the skyline Earth sinks behind.' : 'nothing tall stands between it and Earth.'}`, C.earth]);
     if (dS <= 5 && dE <= 5) why.push(['Within 5 points of the best on both Sun and Earth: that is how a real site planner picks.', C.ui]);
-    why.push(['Real Artemis site studies rank landing sites the same way: hours of sunlight for power, hours with', C.uiDim]);
-    why.push(['Earth in view for comms, and gentle slopes for the lander.', C.uiDim]);
+    const Y = P.chkY, Q = P.chkB, deg = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '°';
+    if (Q) {
+      why.push([`CHECK, raw LOLA (no smoothing, 720 directions, 140 km): yours SUN ${Y.sun}% EARTH ${Y.earth}%, the pick SUN ${Q.sun}% EARTH ${Q.earth}%. Closest call at the pick: Sun ${deg(Q.mS)}, Earth ${deg(Q.mE)} above its skyline${Math.min(Q.mS, Q.mE) < 0.3 ? ' (too close to call: a few metres of terrain decide it)' : ''}.`, C.uiDim]);
+      if (B.sun >= 95 && Q.top < 3) why.push([`Why 100% with the Sun never above ${Q.top.toFixed(1)}°: from ${Math.round(hgt(kmB.x, kmB.y) * 1000)} m up, the skyline under the Sun's path never rises above ${Q.sky.toFixed(1)}°, so the Sun stays clear while lower ground loses it.`, C.uiDim]);
+    } else why.push(['Real Artemis site studies rank sites the same way: sunlight for power, Earth for comms, gentle slopes.', C.uiDim]);
     let y = sr + 7; for (const [t, col] of why) for (const l of wrap(t, w - 12)) { if (y < sr + 15) str(c0 + 5, ++y, l, col); }
   }
   str(c0 + 5, sr + 15, '█ sun + earth   ▀ sun only   ▄ earth only   · dark', C.uiDim);
@@ -2095,7 +2295,7 @@ function tickAnims(dt) {
   state.pulses = state.pulses.filter(p => p.t < 1.1);
   for (const m of state.msgs) {
     m.age += dt;
-    if (m.shown < m.text.length) { m.shown += 70 * dt; if (Math.floor(m.shown) % 3 === 0) sfx.click(); }
+    if (m.delay > 0) m.delay -= dt; else if (m.shown < m.text.length) { m.shown += (m.rate || 70) * dt; if (Math.floor(m.shown) % 3 === 0) sfx.click(); }
     else if (m.capcom && !m.closed) { m.closed = true; sfx.quindar(false); } // the out-tone: CAPCOM is done talking
   }
   if (state.dialog && state.dialog.shown < state.dialog.text.length) { state.dialog.shown += 75 * dt; sfx.click(); }
@@ -2156,8 +2356,8 @@ function surfaceUpdate(dt) {
   else if (pressed('Enter')) {
     if (landerDist() <= tune.board_radius) {
       if (state.launchAsk > 0) { state.launchAsk = 0; state.depart = state.t; endMission('depart'); return; }
-      state.launchAsk = 3; sfx.beep(660);
-      radio(`CDR: Launch now, ${fmtH(state.depart - state.t)} early? ENTER again to go.`, C.white);
+      state.launchAsk = tune.launch_confirm; sfx.beep(660);
+      pushMsg(`LANDER: ${fmtH(state.depart - state.t)} early · ENTER again to launch.`, C.white, 0, true); radio('CDR: We still have time on the clock. Launch now anyway?', C.white);
     } else act();
   } else if (pressed('KeyZ')) { R.v = 0; sfx.servo(); advance(tune.wait_hours, 'wait'); }
   if (state.endKind) return;
@@ -2172,6 +2372,261 @@ function surfaceUpdate(dt) {
   state.skyT += dt;
   if (state.skyT >= 0.2) { state.skyT = 0; checkSky(); if (!state.endKind) state.obj = objective(); }
   lightTick(state.t); relight();
+}
+
+// ---- Planner Mode: any hour of 2027, any site on the baked map, compared side by side --------------------
+/** Named sites: the published ones that fall on the map (from VALIDATION), then the game's own landmarks. */
+const PL_SITES = (() => {
+  const inMap = g => { const c = Math.round(g.x / SITE.cell_x), r = Math.round(g.y / SITE.cell_y); return c >= 0 && c < MC && r >= 0 && r < MR ? { c, r } : null; };
+  const out = VALIDATION.sites.map(s => ({ name: s.name, tag: s.name.split(' ').pop(), cell: inMap(GEO.toGame(s.lat, s.lon)) }));
+  for (const P of PLANNER.extra_sites) out.push({ name: P.name, tag: P.tag, cell: { c: P.cell[0], r: P.cell[1] } });
+  return out;
+})();
+/** Into Planner Mode: no score, no rover, no clock pressure; the scout over the ridge and a free date. */
+function startPlanner() {
+  state = { t: 0, score: 0, gained: '', scores: [], anim: 0 };
+  startMission(0, false);
+  const site = PL_SITES.find(s => s.cell);
+  Object.assign(state, { mode: 'planner', dialog: null, msgs: [], cursor: { ...site.cell },
+    pl: { m: { name: 'PLANNER', start: PLANNER.start, duration: PLANNER.windows[1] }, H0: 0, wi: 1, heatOn: false, heat: null, slip: false, input: null, play: false, si: 0, err: '' } });
+  plSet((Date.parse(PLANNER.start) - EPH.t0) / 3600e3);
+  radio(`PLANNER: ${site.name}. Pick any hour of 2027 and compare up to 3 flagged sites. H: guide.`, C.ui);
+  if (tune.walkthrough && !tourSeen.planner) startTour('planner');
+}
+/** Move the planning date to absolute hour H (hours since the table starts), clamped to 2027. */
+function plSet(H) {
+  const P = state.pl, D = P.m.duration;
+  P.H0 = clamp(H, 0, EPH.n - 2 - D);
+  P.m.start = new Date(EPH.t0 + P.H0 * 3600e3).toISOString();
+  state.statCache.clear(); updateSky();
+}
+/** Sun/Earth share, the 20-bucket timeline, and next sunset/Earthset for a cell over the planner's window, offset by `off` hours. */
+function plStats(c, r, off = 0) {
+  const key = `p${c},${r},${off}`;
+  let s = state.statCache.get(key);
+  if (s) return s;
+  const D = mission().duration;
+  s = siteStats(c, r, off, D);
+  if (off === 0) {
+    const p = profile(c, r), sun = sunAt(0), earth = earthAt(0);
+    s.sunVis = visible(p, sun); s.earthVis = visible(p, earth); s.clear = sun.el - horizonAt(p, sun.az);
+    s.sunNext = nextChange(p, 'sun', 0, s.sunVis); s.earthNext = nextChange(p, 'earth', 0, s.earthVis);
+  }
+  state.statCache.set(key, s);
+  return s;
+}
+/** The best-sites heat map: every landable cell scored by (sun% + earth%) / 2 over the window, a few per frame. */
+function heatStep() {
+  const P = state.pl, D = mission().duration, key = `${P.H0}|${D}`;
+  if (!P.heat || P.heat.key !== key) P.heat = { key, v: new Int16Array(MC * MR).fill(-99), i: 0 };
+  const Hm = P.heat, t0 = performance.now(), stepH = Math.max(1, D / 96);
+  while (Hm.i < MC * MR && performance.now() - t0 < tune.plan_heat_ms) {
+    const i = Hm.i++, c = i % MC, r = Math.floor(i / MC);
+    if (PSR[i]) { Hm.v[i] = -1; continue; }
+    if (landSlope(c, r) > tune.land_slope_max) { Hm.v[i] = -2; continue; }
+    const p = profile(c, r); let s = 0, e = 0, n = 0;
+    for (let h = 0; h <= D; h += stepH) { n++; if (visible(p, sunAt(h))) s++; if (visible(p, earthAt(h))) e++; }
+    Hm.v[i] = Math.round(50 * (s + e) / n);
+  }
+}
+const HEAT_COL = v => v === -1 ? '#3a6aa0' : v === -2 ? '#4a4a4a' : v >= 80 ? '#5dff9a' : v >= 60 ? '#c8e860' : v >= 40 ? '#ffb347' : '#ff5a3c';
+/** Tint the map's dots by the heat score, so the ground's shape still shows. */
+function composeHeat(F0, R0, y0) {
+  const Hm = state.pl.heat; if (!Hm) return;
+  for (let i = 0; i < Hm.i; i++) {
+    const v = Hm.v[i]; if (v === -99) continue;
+    const c = i % MC, r = Math.floor(i / MC), col = HEAT_COL(v);
+    for (let k = 0; k < FX * FY; k++) {
+      const fi = c * FX + (k % FX), fj = r * FY + Math.floor(k / FX), n = fj * FMC + fi;
+      fput(F0 + fi, R0 + fj, mapCh[n] !== ' ' ? mapCh[n] : (v < 0 ? ' ' : '·'), col);
+    }
+  }
+  const done = Hm.i >= MC * MR ? 'DONE' : `${Math.round(100 * Hm.i / (MC * MR))}%`;
+  str(3, y0 + 27, ' HEAT (SUN%+EARTH%)/2: ', C.uiDim); let x = 26;
+  for (const [t, v] of [['80+ ', 80], ['60 ', 60], ['40 ', 40], ['<40 ', 0], ['PSR ', -1], ['STEEP ', -2]]) { put(x, y0 + 27, '█', HEAT_COL(v)); str(x + 1, y0 + 27, t, C.uiDim); x += t.length + 2; }
+  str(x, y0 + 27, done + ' ', C.ui);
+}
+/** Planner input: the orbit scout's moves and flags, plus the date, window, sites, coordinates, slip test, heat map. */
+function plannerUpdate(dt) {
+  const P = state.pl;
+  if (P.input !== null) { // typing a latitude/longitude
+    for (const k of typed) if (k.length === 1 && /[0-9.,\- sSeEwWnN°]/.test(k) && P.input.length < 28) P.input += k;
+    if (pressed('Backspace')) P.input = P.input.slice(0, -1);
+    if (pressed('Escape')) { P.input = null; P.err = ''; }
+    else if (pressed('Enter')) plGoto(P.input);
+    return;
+  }
+  if (pressed('Escape')) { voiceStop(); scene = 'title'; state.anim = 2; return; }
+  if (pressed('KeyV')) { state.view = state.view === 'pov' ? 'map' : 'pov'; sfx.servo(); }
+  if (state.view === 'pov') { const tl = down.has('KeyQ'), tr = down.has('KeyE'); if (tl !== tr) state.hd = (state.hd + (tr ? 1 : -1) * tune.turn_rate * dt + 360) % 360; }
+  const mv = moveInput(dt);
+  if (mv) { state.cursor.c = clamp(state.cursor.c + mv[0], 0, MC - 1); state.cursor.r = clamp(state.cursor.r + mv[1], 0, MR - 1); updateSky(); sfx.telemetry(); }
+  if (pressed('KeyF')) {
+    if (state.flags.length >= 3) state.flags.shift();
+    state.flags.push({ c: state.cursor.c, r: state.cursor.r }); sfx.beep(1046);
+    const st = plStats(state.cursor.c, state.cursor.r);
+    radio(`FLAG ${state.flags.length} at ${fmtLL(GEO.toLatLon(state.cursor.c * SITE.cell_x, state.cursor.r * SITE.cell_y))}: Sun ${st.sun}% · Earth ${st.earth}%.`, C.ui);
+  }
+  ['Digit1', 'Digit2', 'Digit3'].forEach((k, i) => { if (pressed(k) && state.flags[i]) { state.cursor = { ...state.flags[i] }; updateSky(); sfx.beep(); } });
+  if (pressed('KeyN')) { // the next named site on the map
+    const list = PL_SITES.filter(s => s.cell); P.si = (P.si + 1) % list.length;
+    state.cursor = { ...list[P.si].cell }; updateSky(); sfx.beep(); radio(`PLANNER: ${list[P.si].name}.`, C.ui);
+  }
+  if (pressed('KeyL')) { P.input = ''; P.err = ''; P.play = false; sfx.click(); return; }
+  if (pressed('KeyT')) { P.slip = !P.slip; sfx.servo(); }
+  if (pressed('KeyB')) { P.heatOn = !P.heatOn; sfx.servo(); }
+  if (pressed('KeyY')) { P.wi = (P.wi + 1) % PLANNER.windows.length; P.m.duration = PLANNER.windows[P.wi]; plSet(P.H0); sfx.servo(); }
+  if (pressed('KeyP')) { P.play = !P.play; sfx.beep(P.play ? 880 : 660); }
+  let dH = 0;
+  if (repeatKey('plh+', ['BracketRight'], dt, 0.12)) dH += 1;
+  if (repeatKey('plh-', ['BracketLeft'], dt, 0.12)) dH -= 1;
+  if (repeatKey('pld+', ['Period'], dt, 0.2)) dH += 24;
+  if (repeatKey('pld-', ['Comma'], dt, 0.2)) dH -= 24;
+  if (repeatKey('plw+', ['Equal'], dt, 0.3)) dH += 168;
+  if (repeatKey('plw-', ['Minus'], dt, 0.3)) dH -= 168;
+  if (P.play) { dH += tune.plan_lapse * dt; if (P.H0 + dH >= EPH.n - 2 - P.m.duration) P.play = false; }
+  if (dH) { plSet(P.play ? P.H0 + dH : Math.round(P.H0 + dH)); if (!P.play) sfx.servo(); }
+  if (P.heatOn && !P.play) heatStep();
+  lightTick(0, 3000); relight();
+}
+/** Parse "89.31S 245.98E", "-89.31, 245.98" or "-89.31 -114.02" and move the scout there, if it is on the baked map. */
+function plGoto(text) {
+  const P = state.pl, nums = (text.match(/-?\d+(\.\d+)?/g) || []).map(Number);
+  if (nums.length < 2) { P.err = 'TYPE TWO NUMBERS: LATITUDE AND LONGITUDE'; sfx.warn(); return; }
+  let [lat, lon] = nums;
+  if (Math.abs(lat) > 90) { P.err = 'LATITUDE GOES FROM 0 TO 90 (THIS MAP: ABOUT 89.0-89.9 S)'; sfx.warn(); return; }
+  if (/[nN]/.test(text)) { P.err = 'THIS MAP IS THE SOUTH POLE ONLY'; sfx.warn(); return; }
+  lat = -Math.abs(lat); if (/[wW]/.test(text)) lon = -Math.abs(lon); lon = (lon % 360 + 360) % 360;
+  const g = GEO.toGame(lat, lon), c = Math.round(g.x / SITE.cell_x), r = Math.round(g.y / SITE.cell_y);
+  if (c < 0 || c >= MC || r < 0 || r >= MR) { P.err = `${fmtLL({ lat, lon })} IS OFF THE MAP (${(Math.hypot(g.x - 15, g.y - 6.65)).toFixed(0)} KM AWAY)`; sfx.warn(); return; }
+  state.cursor = { c, r }; P.input = null; P.err = ''; updateSky(); sfx.link();
+  radio(`PLANNER: moved to ${fmtLL({ lat, lon })} (nearest 300 m cell).`, C.ui);
+}
+function composeLatLonInput() {
+  const P = state.pl, c0 = 16, r0 = 22, w = 70;
+  fillRect(c0, r0, w, 9); box(c0, r0, w, 9, C.ui, 'GO TO COORDINATES', C.amber);
+  str(c0 + 3, r0 + 2, 'Latitude and longitude, e.g.  89.31S 245.98E  or  -89.69, 197.19', C.uiDim);
+  const map = PLANNER.map_note;
+  str(c0 + 3, r0 + 3, map, C.uiDark);
+  str(c0 + 3, r0 + 5, '> ' + P.input + (Math.floor(state.anim * 3) % 2 ? '█' : ' '), C.white);
+  if (P.err) str(c0 + 3, r0 + 6, P.err.slice(0, w - 6), C.red);
+  bottomText(c0, r0 + 8, w, 'ENTER go · BACKSPACE · ESC cancel', C.amber);
+}
+/** The comparison panel: here and 3 flags, each with sun/earth share, a timeline, the clearance and next set times. */
+function composePlannerPanel(b) {
+  const P = state.pl, D = mission().duration, h = 42 - b;
+  box(102, b, 40, h, C.uiDim, P.slip ? 'SLIP TEST · COMPARE' : 'COMPARE SITES', C.ui, `${D}h`);
+  str(104, b + 1, `FROM ${utcAt(0).slice(5)}`, C.uiDim); str(129, b + 1, 'SUN EARTH', C.uiDim);
+  const sites = [['HERE', state.cursor, C.white]].concat([0, 1, 2].map(i => [`[${i + 1}]`, state.flags[i], C.ui]));
+  sites.forEach(([label, cell, col], k) => {
+    const r = b + 2 + k * 2;
+    if (!cell) { str(104, r, `${label} F plants a flag here`, C.uiDark); return; }
+    const st = plStats(cell.c, cell.r);
+    str(104, r, label, col);
+    st.tl.forEach((v, i) => put(109 + i, r, v === 3 ? '█' : v === 1 ? '▀' : v === 2 ? '▄' : '·', v === 3 ? C.ui : v === 1 ? C.amber : v === 2 ? C.earth : C.uiDark));
+    str(130, r, String(st.sun).padStart(3) + '%', C.amber); str(135, r, String(st.earth).padStart(3) + '%', C.earth);
+    str(106, r + 1, `${st.sunVis ? 'SUNSET' : 'SUNRISE'} ${fmtH(st.sunNext)}`, st.sunVis ? C.amber : C.amberDim);
+    str(121, r + 1, `${st.earthVis ? 'E.SET' : 'E.RISE'} ${fmtH(st.earthNext)}`, st.earthVis ? C.earth : C.earthDim);
+    str(134, r + 1, sgn(st.clear, 1) + '°', st.clear > 0 ? C.sun : C.red);
+  });
+  if (P.slip) { // the same window started later: does the site still work if the landing slips?
+    const offs = PLANNER.slips, r0 = b + 11;
+    str(104, r0, 'SUN% IF IT SLIPS', C.uiDim); offs.forEach((o, i) => str(121 + i * 5, r0, (o ? '+' + (o % 24 ? o + 'h' : o / 24 + 'd') : '+0').padStart(4), C.uiDim));
+    sites.forEach(([label, cell, col], k) => {
+      if (!cell) return;
+      str(104, r0 + 1 + k, label, col);
+      const base = plStats(cell.c, cell.r).sun;
+      offs.forEach((o, i) => { const v = plStats(cell.c, cell.r, o).sun; str(121 + i * 5, r0 + 1 + k, String(v).padStart(4), v >= base - 5 ? C.ui : v >= base - 20 ? C.amber : C.red); });
+    });
+  } else {
+    str(104, b + 11, '█ sun+earth ▀ sun ▄ earth · dark', C.uiDim);
+    str(104, b + 12, 'last col: Sun above the skyline now', C.uiDark);
+    const ms = state.msgs[state.msgs.length - 1];
+    if (ms) wrap(ms.text.slice(0, Math.floor(ms.shown)), 37).slice(0, 3).forEach((l, i) => str(104, b + 13 + i, l, ms.color));
+  }
+}
+
+// ---- Validation: the game's numbers next to published and independently queried ones --------------------
+/** Computes the game's side of every comparison on VALIDATION, raw LOLA and as played (smoothed). */
+function runValidation() {
+  const V = VALIDATION, out = { sites: [], sky: [], psr: null };
+  const grids = [[lolaGrid(LOLA.fine, 0), lolaGrid(LOLA.coarse, 0)], [LF, LC]];
+  const D = []; for (let d = 0.04; d < 140; d *= 1.04) D.push(d);
+  const NA = 720;
+  const prof = (G, x, y) => { // horizon all round, 2 m eye, curvature, local tilt
+    const Hh = (a, b) => { let z = sampleGrid(G[0], a, b); if (z !== z) z = sampleGrid(G[1], a, b); return z !== z ? 0 : z; };
+    const p = new Float32Array(NA), h0 = Hh(x, y) + 0.002;
+    for (let a = 0; a < NA; a++) { const az = (a + 0.5) * 360 / NA * D2R, sx = Math.sin(az), sy = -Math.cos(az); let m = -1;
+      for (const d of D) { const s = (Hh(x + sx * d, y + sy * d) - d * d / (2 * MOON_R) - h0) / d; if (s > m) m = s; }
+      p[a] = Math.atan(m) * R2D - tiltAt(x, y, sx, sy) * R2D; }
+    return p;
+  };
+  const year = p => { // over all of 2027: illumination (share of the disc) and any-part visibility
+    let ill = 0, vis = 0, best = -99;
+    for (let i = 0; i < EPH.n; i++) { const az = ((EPH.e[i * 4] / 100) % 360 + 360) % 360, d = EPH.e[i * 4 + 1] / 100 - p[Math.floor(az / 360 * NA) % NA];
+      if (d > -0.267) vis++; ill += clamp(d / 0.533 + 0.5, 0, 1); if (d > best) best = d; }
+    return { ill: 100 * ill / EPH.n, vis: 100 * vis / EPH.n, best };
+  };
+  for (const s of V.sites) { const g = GEO.toGame(s.lat, s.lon); out.sites.push({ s, raw: year(prof(grids[0], g.x, g.y)), play: year(prof(grids[1], g.x, g.y)) }); }
+  for (const q of V.horizons) {
+    const t = (Date.parse(q.utc) - EPH.t0) / 3600e3, sun = ephAt(t, 0), earth = ephAt(t, 2);
+    out.sky.push({ q, sun, earth, dS: sun.el - q.sunEl, dE: earth.el - q.earthEl, azS: ((sun.az - q.sunAz) % 360 + 360) % 360, azE: ((earth.az - q.earthAz) % 360 + 360) % 360 });
+  }
+  const g = GEO.toGame(V.psr.lat, V.psr.lon);
+  out.psr = { raw: year(prof(grids[0], g.x, g.y)), play: year(prof(grids[1], g.x, g.y)) };
+  return out;
+}
+function composeValidation() {
+  clearGrid(); fx.sun = null; fx.earth = null;
+  const V = state.val, W = VALIDATION;
+  str(1, 0, 'CRATER EXPECTATIONS', C.amber); str(22, 0, '│ VALIDATION · THE GAME\'S NUMBERS NEXT TO PUBLISHED AND INDEPENDENT ONES', C.ui);
+  bottomText(0, 44, COLS, 'ESC / ENTER back to title · every "game" number below is computed live on this page from the data the game plays on', C.uiDim);
+  if (!V) { strC(20, 'COMPUTING: 10 HORIZON PROFILES × 720 AZIMUTHS × 8,761 HOURS OF 2027 ...', C.amber); return; }
+  const f1 = v => v.toFixed(1), d1 = v => (v >= 0 ? '+' : '') + v.toFixed(1), dc = (d, ok, warn) => Math.abs(d) <= ok ? C.ui : Math.abs(d) <= warn ? C.amber : C.red;
+  // 1 · sunlight at published sites
+  box(0, 1, COLS, 11, C.uiDim, '1 · SUNLIGHT AT PUBLISHED SITES, % OF TIME', C.ui, W.sites_source);
+  const cx = [3, 24, 44, 59, 86, 113];
+  str(cx[0], 2, 'SITE', C.uiDim); str(cx[1], 2, 'LAT / LON', C.uiDim); str(cx[2], 2, 'PUBLISHED', C.uiDim);
+  str(cx[3], 2, 'GAME · RAW LOLA (Δ)', C.uiDim); str(cx[4], 2, 'GAME · AS PLAYED (Δ)', C.uiDim); str(cx[5], 2, 'ON THE GAME MAP?', C.uiDim);
+  str(cx[2], 3, 'LIT    SEEN', C.uiDark); str(cx[3], 3, 'LIT          SEEN', C.uiDark); str(cx[4], 3, 'LIT          SEEN', C.uiDark);
+  let mr = 0, mp = 0;
+  V.sites.forEach(({ s, raw, play }, i) => {
+    const r = 4 + i, site = PL_SITES[i];
+    str(cx[0], r, s.name, C.white); str(cx[1], r, fmtLL(s), C.uiDim);
+    str(cx[2], r, f1(s.ill).padStart(4) + '%  ' + f1(s.vis).padStart(4) + '%', C.white);
+    const cell = (c, o) => { str(c, r, f1(o.ill).padStart(4) + '% ' + `(${d1(o.ill - s.ill)})`.padEnd(8), dc(o.ill - s.ill, 3, 6)); str(c + 13, r, f1(o.vis).padStart(4) + '% ' + `(${d1(o.vis - s.vis)})`, dc(o.vis - s.vis, 3, 6)); };
+    cell(cx[3], raw); cell(cx[4], play);
+    str(cx[5], r, site && site.cell ? `yes · cell ${site.cell.c},${site.cell.r}` : 'just off the top edge', site && site.cell ? C.ui : C.uiDim);
+    mr += (Math.abs(raw.ill - s.ill) + Math.abs(raw.vis - s.vis)) / 2; mp += (Math.abs(play.ill - s.ill) + Math.abs(play.vis - s.vis)) / 2;
+  });
+  str(cx[0], 9, `MEAN DIFFERENCE   raw ${(mr / 4).toFixed(1)} points   ·   as played ${(mp / 4).toFixed(1)} points`, C.amber);
+  str(cx[0], 10, 'LIT = average share of the Sun\'s disc above the skyline · SEEN = any part of the disc above it', C.uiDim);
+  // 2 · Sun and Earth against Horizons
+  box(0, 12, COLS, 13, C.uiDim, '2 · SUN & EARTH ELEVATION vs JPL HORIZONS', C.ui, W.horizons_source);
+  const sx = [3, 24, 37, 50, 62, 78, 91, 104, 120];
+  ['UTC (2027)', 'SUN HORIZ.', 'SUN GAME', 'Δ', 'EARTH HORIZ.', 'EARTH GAME', 'Δ', 'AZ FRAME TURN', ''].forEach((t, i) => str(sx[i], 13, t, C.uiDim));
+  let mS = 0, mE = 0; const turns = [];
+  V.sky.forEach((o, i) => {
+    const r = 14 + i;
+    str(sx[0], r, o.q.utc.slice(5, 16).replace('T', ' '), C.white);
+    str(sx[1], r, sgn(o.q.sunEl, 3) + '°', C.amber); str(sx[2], r, sgn(o.sun.el, 3) + '°', C.amber); str(sx[3], r, sgn(o.dS, 3), dc(o.dS, 0.05, 0.2));
+    str(sx[4], r, sgn(o.q.earthEl, 3) + '°', C.earth); str(sx[5], r, sgn(o.earth.el, 3) + '°', C.earth); str(sx[6], r, sgn(o.dE, 3), dc(o.dE, 0.05, 0.2));
+    str(sx[7], r, `sun ${o.azS.toFixed(1)}° earth ${o.azE.toFixed(1)}°`, C.uiDim);
+    mS = Math.max(mS, Math.abs(o.dS)); mE = Math.max(mE, Math.abs(o.dE)); turns.push(o.azS, o.azE);
+  });
+  const spread = Math.max(...turns) - Math.min(...turns);
+  str(sx[0], 22, `LARGEST DIFFERENCE   Sun ${mS.toFixed(3)}°   ·   Earth ${mE.toFixed(3)}°   (the Sun's disc is 0.53° wide)`, C.amber);
+  str(sx[0], 23, `AZ FRAME TURN: the game measures azimuth from map-up, Horizons from north; a constant turn (spread ${spread.toFixed(1)}°) means the directions agree too`, C.uiDim);
+  // 3 · permanent shadow
+  box(0, 25, COLS, 6, C.uiDim, '3 · PERMANENT SHADOW · SHACKLETON CRATER FLOOR', C.ui, W.psr.source);
+  const ps = V.psr, never = o => o.vis === 0;
+  str(3, 26, `Published: the floor of Shackleton (${fmtLL(W.psr)}) never sees the Sun.`, C.white);
+  str(3, 27, `Game, raw LOLA:   sunlit ${f1(ps.raw.vis)}% of 2027 · closest the Sun's top edge gets: ${Math.abs(ps.raw.best + 0.267).toFixed(2)}° below the rim`, never(ps.raw) ? C.ui : C.red);
+  str(3, 28, `Game, as played:  sunlit ${f1(ps.play.vis)}% of 2027 · closest: ${Math.abs(ps.play.best + 0.267).toFixed(2)}° below the rim`, never(ps.play) ? C.ui : C.red);
+  str(3, 29, never(ps.raw) && never(ps.play) ? 'AGREES: permanently shadowed in both, so a cold trap where water ice can last.' : 'DISAGREES: see method and limits.', never(ps.raw) && never(ps.play) ? C.ui : C.red);
+  // 4 · method and limits
+  box(0, 31, COLS, 11, C.uiDim, '4 · METHOD AND LIMITS', C.ui);
+  VALIDATION.method.forEach((t, i) => str(3, 32 + i, t, C.ui));
 }
 
 const scenes = {
@@ -2203,6 +2658,8 @@ const scenes = {
       state.anim += dt;
       if (Math.floor(state.anim * 60) % 4 === 0 && state.anim < 1.6) sfx.click();
       if (pressed('Enter') || pressed('Space')) { reset(); scene = 'play'; sfx.static(0.5); }
+      else if (pressed('KeyP')) { startPlanner(); scene = 'planner'; sfx.static(0.5); }
+      else if (pressed('KeyV')) { scene = 'validate'; state.val = null; state.anim = 0; sfx.servo(); }
       musicUpdate({ warm: 1, home: 1 });
     },
     draw() {
@@ -2215,7 +2672,8 @@ const scenes = {
       composeSkyLabels(29, info);
       box(8, 32, 126, 7, C.uiDim, 'CONTROLS', C.ui);
       CONTROLS.forEach((c, i) => str(11, 34 + i, c, C.ui));
-      if (Math.floor(state.anim * 2) % 2) strC(40, '>>  PRESS ENTER TO LAUNCH  <<', C.amber);
+      if (Math.floor(state.anim * 2) % 2) strC(40, '>>  ENTER: PLAY THE MISSIONS  ·  P: PLANNER MODE  ·  V: VALIDATION  <<', C.amber);
+      else strC(40, '    ENTER: PLAY THE MISSIONS  ·  P: PLANNER MODE  ·  V: VALIDATION    ', C.amberDim);
       strC(42, 'TERRAIN: NASA LRO / LOLA laser altimetry (LDEM 40 m + 240 m)  ·  SUN & EARTH: JPL HORIZONS EPHEMERIS, 2027', C.uiDim);
       strC(43, 'Shackleton and its connecting ridge from the measured heights, smoothed for play. Rover, power and score are a game model.', C.uiDark);
       present();
@@ -2243,13 +2701,9 @@ const scenes = {
   cut: {
     update(dt) {
       tickAnims(dt);
-      const c = state.cut, dur = c.kind === 'landing' ? tune.cut_landing : tune.cut_launch, k = dur / CUT_BASE[c.kind], hitT = CUT_HIT[c.kind] * dur;
+      const c = state.cut, dur = c.dur, hitT = c.hitT, n = c.texts.length;
       c.t += dt;
-      const lines = CUTS[c.kind];
-      while (c.said < lines.length && c.t >= lines[c.said][0] * k) {
-        let t = lines[c.said][1]; if (typeof t === 'function') t = t();
-        radio(t, speakerColor(t)); c.said++;
-      }
+      while (c.said < n && c.t >= c.at[c.said]) { for (const s of c.texts[c.said]) radio(s, speakerColor(s)); c.said++; }
       if (!c.hit && c.t >= hitT) {
         c.hit = true; sfx.thump(c.kind === 'landing' ? 1 : 0.8);
         burst(0.5, 0.9, 120, 1.6, '#b8b0a0', ['.', '·', '∙', '•']);
@@ -2257,11 +2711,29 @@ const scenes = {
       const engine = c.kind === 'landing' ? (c.t < hitT ? 0.6 + 0.4 * c.t / hitT : 0) : (c.t < hitT ? 0.15 : 1 - 0.6 * Math.min(1, (c.t - hitT) / Math.max(0.1, dur - hitT)));
       lightTick(c.kind === 'landing' ? state.landOff : state.t, 3000);
       musicUpdate({ cue: 1, engine, breath: 1, warm: state.sky && state.sky.sunVis ? 1 : 0 });
-      if (pressed('Enter') || pressed('Space') || pressed('Escape')) c.t = dur;
+      if (pressed('Enter') || pressed('Space') || pressed('Escape')) { c.t = dur; c.skip = true; }
+      if (c.skip) { while (c.said < n) { for (const s of c.texts[c.said]) pushMsg(s, speakerColor(s), 0, true); c.said++; } voiceStop(); }
       if (state.plan) plannerRun(tune.planner_cells);
-      if (c.t >= dur) finishCut();
+      if (c.t >= dur && (c.skip || (c.said >= n && !voiceBusy()))) finishCut();
     },
     draw() { composeCut(); present(); },
+  },
+  planner: {
+    update(dt) {
+      tickAnims(dt);
+      if (state.tour) { tourUpdate(); musicUpdate(playMood()); return; }
+      if (pressed('KeyH') && state.pl.input === null) { startTour('planner'); return; }
+      plannerUpdate(dt); if (scene === 'planner') musicUpdate(playMood());
+    },
+    draw() { composePlay(); if (state.pl.input !== null) composeLatLonInput(); present(); },
+  },
+  validate: {
+    update(dt) {
+      state.anim += dt; musicUpdate({ home: 1 });
+      if (!state.val && state.anim > 0.05) state.val = runValidation();
+      if (pressed('Escape') || pressed('Enter') || pressed('KeyV')) { scene = 'title'; state.anim = 2; }
+    },
+    draw() { composeValidation(); present(); },
   },
   pause: {
     update() { if (pressed('Escape') || pressed('KeyP')) scene = 'play'; musicUpdate({}); },
@@ -2286,6 +2758,7 @@ const scenes = {
 };
 
 function nextMission() {
+  voiceStop();
   if (state.mi < MISSIONS.length - 1) { startMission(state.mi + 1); scene = 'play'; }
   else { scene = 'title'; state.anim = 0; }
 }
@@ -2293,7 +2766,8 @@ function nextMission() {
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
 function step() {
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
-  scenes[scene].update(STEP); hit.clear();
+  scenes[scene].update(STEP); hit.clear(); typed.length = 0;
+  voicePump(); if (voice.on && arand() < tune.voice_crackle * STEP) sfx.crackle();
 }
 let last, acc = 0, ALPHA = 1;
 function tick() {
