@@ -20,6 +20,15 @@
   note: "the game blends these heights toward a smoothed copy at load (config terrain_smooth, smooth_km) and says so on screen"
   date: 2026-11-14
   ships: true
+- path: assets/data/earth-land.js
+  origin: code
+  tool: "tools/earthbake.js (node tools/earthbake.js <ne_110m_land.geojson> assets/data/earth-land.js): rasterises the land polygons to a 360 x 180 one-degree mask, even-odd rule, pole cap filled"
+  model: "claude-opus-5-5 (wrote the bake script)"
+  source: {vendor: "Natural Earth", product: "ne_110m_land (1:110m physical vectors, land)", url: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_land.geojson"}
+  licence: {id: "LicenseRef-Natural-Earth-Public-Domain"}
+  note: "draws the coastlines on the Earth disc; the face shown follows a low-precision Moon position (about 1 degree), the size is enlarged for play (config earth_size)"
+  date: 2026-11-14
+  ships: true
 - path: assets/data/validation.js
   origin: code
   tool: "hand-written from the cited sources; the Horizons rows came from JPL Horizons API topocentric queries (CENTER coord@301, SITE_COORD 245.699,-89.5891,0, QUANTITIES 4, APPARENT AIRLESS) run once at development time"

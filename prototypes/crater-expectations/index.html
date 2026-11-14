@@ -18,6 +18,7 @@
 <script src="config.js"></script>
 <script src="assets/data/lola-site.js"></script>
 <script src="assets/data/validation.js"></script>
+<script src="assets/data/earth-land.js"></script>
 <script src="assets/data/voice.js"></script>
 <script>
 'use strict';
@@ -1641,37 +1642,81 @@ function sunDisc(cx, cy, R, clip, dim, t) {
     }
   }
 }
+/** The 1° land mask (assets/data/earth-land.js, Natural Earth 1:110m): is (lat, lon) in degrees on land? */
+const EARTH_BITS = window.EARTH_LAND ? Uint8Array.from(atob(window.EARTH_LAND.bits), ch => ch.charCodeAt(0)) : null;
+function earthLand(lat, lon) {
+  if (!EARTH_BITS) return vnoise(lon / 38 + 50, lat / 30 + 20) > 0.6;
+  const E = window.EARTH_LAND, j = Math.min(E.h - 1, Math.max(0, Math.floor(90 - lat)));
+  const i = ((Math.floor(lon + 180) % E.w) + E.w) % E.w, b = j * E.w + i;
+  return (EARTH_BITS[b >> 3] & (0x80 >> (b & 7))) !== 0;
+}
 /**
- * The Earth as a dot-matrix disc showing its true phase: oceans, land and cloud turn with the hours,
- * the night side stays black. RX is the radius in fine columns.
+ * The point on Earth directly under the Moon at mission hour t: which face of the Earth the crew sees.
+ * Low-precision Moon position (main terms of Meeus ch. 47, about 1° accurate) against Greenwich sidereal time.
+ */
+function earthFace(t, mi) {
+  const d = (Date.parse(mission(mi).start) + t * 3600e3) / 864e5 + 2440587.5 - 2451545.0;
+  const L = 218.316 + 13.176396 * d, M = (134.963 + 13.064993 * d) * D2R, F = (93.272 + 13.229350 * d) * D2R;
+  const lam = (L + 6.289 * Math.sin(M)) * D2R, bet = 5.128 * Math.sin(F) * D2R, eps = 23.439 * D2R;
+  const ra = Math.atan2(Math.sin(lam) * Math.cos(eps) - Math.tan(bet) * Math.sin(eps), Math.cos(lam)) * R2D;
+  const dec = Math.asin(Math.sin(bet) * Math.cos(eps) + Math.cos(bet) * Math.sin(eps) * Math.sin(lam)) * R2D;
+  const gmst = 280.46061837 + 360.98564736629 * d;
+  return { lat: dec, lon: ((ra - gmst) % 360 + 540) % 360 - 180 };
+}
+/**
+ * The Earth as a dot-matrix disc showing its true phase and its real face: Natural Earth coastlines turned to
+ * the longitude under the Moon at that hour, ice caps, cloud bands, an ocean sun glint, the air glowing on the
+ * lit limb and city lights on the night side. Seen from the lunar south pole Earth's south pole points up,
+ * so the map is drawn south-up. RX is the radius in fine columns; t is the mission hour.
  */
 function earthDisc(cx, cy, RX, sun, earth, vis, t, clip) {
   const ph = earthPhase(sun, earth), th = (180 - ph.sep) * D2R;
-  const Lx = Math.sin(th) * ph.side, Lz = Math.cos(th), RY = RX * FW / FH, rot = t * 15;
-  for (let y = -Math.ceil(RY); y <= Math.ceil(RY); y++) for (let x = -Math.ceil(RX); x <= Math.ceil(RX); x++) {
+  const Lx = Math.sin(th) * ph.side, Lz = Math.cos(th), RY = RX * FW / FH;
+  const face = earthFace(t), f0 = face.lat * D2R, sf0 = Math.sin(f0), cf0 = Math.cos(f0);
+  const hl = Math.hypot(Lx, Lz + 1) || 1, Hx = Lx / hl, Hz = (Lz + 1) / hl; // half-vector for the sea glint
+  const drift = (state.anim || 0) * 0.4, halo = vis ? 1.12 : 1;
+  for (let y = -Math.ceil(RY * halo); y <= Math.ceil(RY * halo); y++) for (let x = -Math.ceil(RX * halo); x <= Math.ceil(RX * halo); x++) {
     const nx = x / RX, ny = y / RY, q = nx * nx + ny * ny;
-    if (q > 1) continue;
+    if (q > halo * halo) continue;
     const fc = cx + x, fr = cy + y;
     if (clip && !clip(fc, fr)) continue;
+    if (q > 1) { // the thin air glow just outside the lit limb
+      const r = Math.sqrt(q), lit = (nx / r) * Lx + 0.25 * Lz;
+      const g = (1 - (r - 1) / (halo - 1)) * Math.max(0, lit + 0.15);
+      if (g > 0.18 && hash2(x + 300, y + 300) < g * 0.9) fput(fc, fr, g > 0.5 ? '•' : '·', g > 0.45 ? '#7ab8ff' : '#2f5f9a');
+      continue;
+    }
     if (!vis) { if (q > 0.8) fput(fc, fr, '.', C.earthDim); continue; }
     const nz = Math.sqrt(1 - q), I = nx * Lx + nz * Lz;
-    const lon = Math.atan2(nx, nz) * R2D + rot, lat = Math.asin(Math.max(-1, Math.min(1, -ny))) * R2D;
-    const land = vnoise(lon / 38 + 50, lat / 30 + 20) > 0.6, ice = Math.abs(lat) > 68;
-    const cl = vnoise(lon / 18 + 3 + t * 0.02, lat / 9 + 8) * 0.7 + vnoise(lon / 7, lat / 5) * 0.3;
+    const X = -nx, Y = ny; // south-up: the map turned half a circle on the sky
+    const lat = Math.asin(Math.max(-1, Math.min(1, nz * sf0 + Y * cf0))) * R2D;
+    const lon = face.lon + Math.atan2(X, nz * cf0 - Y * sf0) * R2D;
+    const land = earthLand(lat, lon), alat = Math.abs(lat);
+    const ice = (land && (alat > 62 || lat < -60)) || alat > 76;
+    const band = Math.exp(-(((lat - 6) / 7) ** 2)) * 0.22 + Math.exp(-(((alat - 52) / 12) ** 2)) * 0.16; // ITCZ, storm tracks
+    const cl = vnoise(lon / 16 + 3 + drift, lat / 8 + 8) * 0.6 + vnoise(lon / 6 + drift * 2, lat / 4) * 0.3 + band - (alat < 30 && land ? 0.12 : 0);
+    const cloud = cl > 0.66;
     if (I <= 0.03) { // the night side, brightened for play so continents, seas and clouds still read; air rim, city lights
-      if (q > 0.9) fput(fc, fr, dotOf(0.4), '#3a6cb0');
-      else if (land && !ice && cl <= 0.62 && hash2(Math.round(lon * 2), Math.round(lat * 2)) < 0.14) fput(fc, fr, dotOf(0.36), '#e0aa58');
-      else if (cl > 0.62 || ice) fput(fc, fr, dotOf(0.5), '#8c9cb4');
-      else if (land) fput(fc, fr, dotOf(0.45), '#6f6a3e');
-      else fput(fc, fr, dotOf(0.42), '#2a62b4');
+      if (q > 0.93) fput(fc, fr, dotOf(0.4), '#3a6cb0');
+      else if (land && !ice && !cloud && hash2(Math.round(lon * 3), Math.round(lat * 3)) < 0.09) fput(fc, fr, dotOf(0.3), '#e8b860');
+      else if (cloud || ice) fput(fc, fr, dotOf(0.55), ice ? '#b4c2d8' : '#8494ac');
+      else if (land) fput(fc, fr, dotOf(0.6), '#8a8250');
+      else fput(fc, fr, dotOf(0.42), '#1f56a8');
       continue;
     }
     const k = Math.min(1, I * 1.15 + 0.05);
-    let col;
-    if (cl > 0.62 || ice) col = k > 0.6 ? '#f4f8ff' : k > 0.3 ? '#b8c8dc' : '#5d6e84';
-    else if (land) col = k > 0.6 ? '#a89a5c' : k > 0.3 ? '#6f6a3e' : '#3c3a24';
-    else col = k > 0.6 ? '#4a9cff' : k > 0.3 ? '#2a6ac0' : '#173c70';
-    fput(fc, fr, dotOf(Math.min(0.99, k * (cl > 0.62 ? 1.1 : 0.95))), col);
+    let col, b = k * 0.95;
+    if (cloud || ice) { col = k > 0.6 ? '#f4f8ff' : k > 0.3 ? '#b8c8dc' : '#5d6e84'; b = k * 1.1; }
+    else if (land) { // deserts in the dry belts, green in the wet tropics and temperate zones
+      const dry = alat > 14 && alat < 34 && vnoise(lon / 9, lat / 9) > 0.35;
+      col = dry ? (k > 0.6 ? '#d8b878' : k > 0.3 ? '#9a7c48' : '#4a3a20') : (k > 0.6 ? '#6fa055' : k > 0.3 ? '#4a7038' : '#24361c');
+    } else {
+      const sp = Math.pow(Math.max(0, nx * Hx + nz * Hz), 60);
+      col = sp > 0.5 ? '#e8f4ff' : k > 0.6 ? '#3a8cf0' : k > 0.3 ? '#2462b8' : '#143870';
+      b = Math.max(k * 0.9, sp);
+    }
+    if (q > 0.9 && I > 0) { col = '#9ccfff'; b = Math.max(b, 0.6); } // the air on the lit limb
+    fput(fc, fr, dotOf(Math.min(0.99, b)), col);
   }
 }
 /** The 360° skyline strip: the real horizon from the cell, in dots, with the Sun and Earth on it. */
@@ -1706,7 +1751,7 @@ function composeSky(p, sun, earth, r0 = SKY_R0, rowsC = SKY_ROWS, withFx = true)
   // the Earth, cut by the ridge where it sinks behind it
   const ec = colOf(earth.az), er = fr0 + Math.max(Math.ceil(4 * FK), Math.min(NF - Math.ceil(5 * FK), Math.floor((EL_MAX - earth.el) / rowH)));
   const ev = visible(p, earth);
-  earthDisc(ec, er, 5 * FK, sun, earth, ev, state.anim * 0.3, ev ? sky : null);
+  earthDisc(ec, er, 5 * FK, sun, earth, ev, state.sky ? state.sky.t : 0, ev ? sky : null);
   if (ev && withFx) fx.earth = { x: (ec + 0.5) * FW, y: (er + 0.5) * FH };
   return { sunCol: Math.floor(sc / FX), ec: Math.floor(ec / FX), sunVis, ev };
 }
@@ -1920,7 +1965,7 @@ function drawWorld(cam, w, rows, fc0, fr0) {
   const sunVis = clearSky(cam.x, cam.y, cam.eye, sun), earthVis = clearSky(cam.x, cam.y, cam.eye, earth);
   const E = proj(earth.az, earth.el), eR = 0.95 * tune.earth_size / cam.dpc;
   if (Math.abs(E.i - w / 2) < w / 2 + eR) {
-    earthDisc(fc0 + Math.round(E.i), fr0 + Math.round(E.row), eR, sun, earth, true, state.anim * 0.3 + cam.t, isSky);
+    earthDisc(fc0 + Math.round(E.i), fr0 + Math.round(E.row), eR, sun, earth, true, cam.t, isSky);
     if (earthVis && E.i >= 0 && E.i < w) fx.earth = { x: (fc0 + E.i + 0.5) * FW, y: (fr0 + E.row + 0.5) * FH };
   }
   const S = proj(sun.az, sun.el), sR = 0.27 * tune.sun_size / cam.dpc;
@@ -2029,11 +2074,24 @@ function labelObjects(W, objs, c0, cmax, rmin, rmax) {
     lab(Math.floor((W.fc0 + P.i) / FX) - Math.floor(txt.length / 2), row, txt, isObj ? (blink ? obj.col : C.white) : m.done ? '#555' : m.color, c0, cmax);
   }
 }
+/**
+ * How far (deg) to tilt a ground camera up so a high Earth stays whole in the frame. The tilt eases in as
+ * the Earth comes into view and never pushes the horizon below 85% of the view, so the terrain is never lost.
+ */
+function earthLift(cam, w, rows) {
+  const e = earthAt(cam.t), rel = Math.abs(angDiff(e.az, cam.hd)), half = cam.dpc * w / 2;
+  const k = clamp((half + 12 - rel) / 24, 0, 1), ease = k * k * (3 - 2 * k);
+  const eRY = 0.95 * tune.earth_size / cam.dpc * FW / FH;
+  const need = (e.el / cam.dpr + eRY + 3 - (cam.hr + cam.pitch / cam.dpr)) * cam.dpr;
+  const room = (rows * 0.85 - (cam.hr + cam.pitch / cam.dpr)) * cam.dpr;
+  return ease * clamp(need, 0, Math.max(0, room));
+}
 /** The ground view from the scout (orbit, V): the same renderer, standing at the scout's cell. */
 function composeOrbitView(y0) {
   const c = state.cursor, x = c.c * SITE.cell_x, y = c.r * SITE.cell_y;
   const w = 100 * FX, rows = (40 - y0) * FY, fc0 = FX, fr0 = (y0 + 1) * FY;
   const cam = { x, y, eye: hgt(x, y) + tune.eye_h, hd: state.hd, pitch: 0, roll: 0, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.landOff, sprScale: tune.obj_scale };
+  cam.pitch += earthLift(cam, w, rows);
   box(0, y0, 102, 42 - y0, C.uiDim, `GROUND VIEW FROM SCOUT · FACING ${DIRN[dir8(state.hd)]} ${Math.round(state.hd)}°`, C.ui, `VERTICAL ×${(cam.dpc * FH / FW / cam.dpr).toFixed(1)} · [V] MAP`);
   const Wd = drawWorld(cam, w, rows, fc0, fr0);
   labelObjects(Wd, worldObjects(), 1, 100, y0 + 1, 40);
@@ -2115,6 +2173,7 @@ function composeVisor(c0, r0, bw, bh) {
   const s = state.sky, R = state.rover, w = (bw - 2) * FX, rows = (bh - 2) * FY, fc0 = (c0 + 1) * FX, fr0 = (r0 + 1) * FY;
   const cam = { x: R.x, y: R.y, eye: R.eye, hd: R.hd, pitch: R.pitch * tune.cam_tilt, roll: -R.roll * tune.cam_tilt, dpc: tune.pov_fov / w, dpr: tune.pov_deg_row, hr: rows * tune.pov_horizon, t: state.t, sprScale: tune.obj_scale,
     lamp: s.sunVis ? null : { x: R.x, y: R.y, r: tune.lamp_range, hd: R.hd, cone: tune.lamp_cone / 2 } };
+  cam.pitch += earthLift(cam, w, rows);
   box(c0, r0, bw, bh, C.uiDark, `ROVER · ${DIRN[dir8(R.hd)]} ${Math.round(R.hd)}°`, C.uiDim, `VERTICAL ×${(cam.dpc * FH / FW / cam.dpr).toFixed(1)} · HOLD TAB: INSTRUMENTS`);
   const W = drawWorld(cam, w, rows, fc0, fr0), blink = Math.floor(state.anim * 2.5) % 2;
   const cmin = c0 + 1, cmax = c0 + bw - 2, rmin = r0 + 2, rmax = r0 + bh - 9;
@@ -2367,7 +2426,7 @@ function composeLander() {
 function composePanel(y0) {
   const s = state.sky, orbit = state.phase === 'orbit';
   box(102, y0, 40, 11, C.uiDim, 'EARTH', C.earth);
-  earthDisc(FX * 103 + 16, FY * (y0 + 1) + 18, 15.5, s.sun, s.earth, s.earthVis, s.t + state.anim * 0.3);
+  earthDisc(FX * 103 + 16, FY * (y0 + 1) + 18, 15.5, s.sun, s.earth, s.earthVis, s.t);
   const ex = 121, a = y0 + 1;
   str(ex, a, `EL ${sgn(s.earth.el, 1)}°`, C.earth); str(ex, a + 1, `AZ ${Math.round(s.earth.az)}°`, C.earth);
   str(ex, a + 2, `PHASE ${Math.round(s.phase.frac * 100)}%`, C.white);

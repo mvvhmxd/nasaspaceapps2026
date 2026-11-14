@@ -78,7 +78,7 @@ window.CONFIG = {
   pov_horizon: { value: 0.55, min: 0.15, max: 0.8, step: 0.01 },  // where the 0° line sits, share of the view height
   turn_rate: { value: 90, min: 20, max: 360, step: 10 },          // ground view from the scout: look-around, deg per second
   sun_size: { value: 7, min: 1, max: 12, step: 0.5 },             // drawn Sun size vs true (0.5°), for readability
-  earth_size: { value: 3.5, min: 1, max: 6, step: 0.5 },          // drawn Earth size vs true (1.9°), for readability
+  earth_size: { value: 7, min: 1, max: 12, step: 0.5 },           // drawn Earth size vs true (1.9°), for readability
   light_step: { value: 0.25, min: 0.05, max: 2, step: 0.05 },     // Sun azimuth change (deg) that re-casts the shadows
   frost_start: { value: 45, min: 0, max: 100, step: 5 },          // battery % where frost starts creeping over the visor
   red_pulse: { value: 20, min: 0, max: 100, step: 5 },            // battery % where the visor edge pulses red
